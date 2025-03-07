@@ -203,7 +203,7 @@ with tab2:
         st.session_state.summary_prompt = st.text_area(
             "Edit the summary prompt below. Hit Ctrl + Enter to save.",
             value=st.session_state.summary_prompt,
-            height=200
+            height=300
         )
         
         # Model selection options
