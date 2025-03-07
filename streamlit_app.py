@@ -218,7 +218,7 @@ with tab2:
         if model_provider == "Claude":
             claude_model = st.selectbox(
                 "Select Claude Model",
-                ["claude-3-7-sonnet-20250219", "claude-3-5-sonnet-20240620"],
+                ["claude-3-7-sonnet-latest", "claude-3-5-sonnet-latest", "claude-3-5-haiku-latest"],
                 index=0
             )
             st.session_state.selected_model = claude_model
@@ -227,7 +227,7 @@ with tab2:
         else:  # OpenAI
             openai_model = st.selectbox(
                 "Select OpenAI Model",
-                ["gpt-4o", "gpt-4-turbo"],
+                ["gpt-4o-2024-08-06", "o1-2024-12-17", "o3-mini-2025-01-31", "gpt-4.5-preview"],
                 index=0
             )
             st.session_state.selected_model = openai_model
