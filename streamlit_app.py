@@ -165,7 +165,7 @@ with tab2:
         # Button to generate/regenerate summary
         if st.button("Generate/Regenerate Summary"):
             with st.spinner("Generating summary..."):
-                st.session_state.summary_prompt = summary_prompt  # Save the edited prompt
+                st.session_state.summary_prompt = st.session_state.summary_prompt  # Save the edited prompt
                 st.session_state.structured_summary = summarize_transcription(
                     st.session_state.structured_transcription, 
                     claude_api_key,
