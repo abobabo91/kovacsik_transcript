@@ -81,12 +81,16 @@ if 'structured_transcription' not in st.session_state:
 if 'structured_summary' not in st.session_state:
     st.session_state.structured_summary = ''
 if 'summary_prompt' not in st.session_state:
-    st.session_state.summary_prompt = """I give you the transcription of an interview. It is a customer discovery call about a company,
-exploring what they do, their business needs, and their methods.
+    st.session_state.summary_prompt = """I have an interview transcription from a customer discovery call. Please help me create a structured summary that:
 
-What I need is a structured summary of the interview for my notes. I want to keep every relevant piece of information that
-has been said, but ignore everything unimportant.
-Write the answers into bullet points and use exact wording when it matters. Do not add extra wording, but only what has been said.
+Captures all relevant business information (company details, needs, methods, pain points)
+Organizes answers by question in bullet point format
+Uses direct quotes when the exact wording is significant
+Omits filler content, pleasantries, and irrelevant tangents
+Maintains the original meaning without adding interpretation
+
+Please provide the transcription, and I'll create a concise, organized summary that preserves all important information while eliminating unnecessary content.
+
 This is the transcript:"""
 
 st.title("Interview Transcription and Summarization")
@@ -128,7 +132,7 @@ with tab2:
         
         # Let user edit the summary prompt
         summary_prompt = st.text_area(
-            "Edit the summary prompt below",
+            "Edit the summary prompt below. Hit Ctrl + Enter to save.",
             value=st.session_state.summary_prompt,
             height=200
         )
