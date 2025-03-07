@@ -157,7 +157,7 @@ with tab2:
         
         # Let user edit the summary prompt
         summary_prompt = st.text_area(
-            "Edit the summary prompt below",
+            "Edit the summary prompt below. Hit Ctrl + Enter to save.",
             value=st.session_state.summary_prompt,
             height=200
         )
