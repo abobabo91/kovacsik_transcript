@@ -156,7 +156,7 @@ with tab2:
         st.subheader("Customize Summary Prompt")
         
         # Let user edit the summary prompt
-        summary_prompt = st.text_area(
+        st.session_state.summary_prompt = st.text_area(
             "Edit the summary prompt below. Hit Ctrl + Enter to save.",
             value=st.session_state.summary_prompt,
             height=200
@@ -165,11 +165,10 @@ with tab2:
         # Button to generate/regenerate summary
         if st.button("Generate/Regenerate Summary"):
             with st.spinner("Generating summary..."):
-                st.session_state.summary_prompt = summary_prompt  # Save the edited prompt
                 structured_summary = summarize_transcription(
                     st.session_state.structured_transcription, 
                     claude_api_key,
-                    summary_prompt
+                    st.session_state.summary_prompt
                 )
                 if structured_summary:
                     st.session_state.structured_summary = structured_summary
@@ -178,7 +177,11 @@ with tab2:
         # Display the summary
         if st.session_state.structured_summary:
             st.subheader("Interview Summary")
-            st.text_area("Summary", st.session_state.structured_summary, height=400, disabled=True)
+            st.text_area("Summary", st.session_state.structured_summary, height=400)
+
+
+
+
 
 # Add download buttons for the outputs
 st.sidebar.header("Download Results")
