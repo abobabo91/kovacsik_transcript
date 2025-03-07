@@ -85,12 +85,12 @@ if 'structured_transcription' not in st.session_state:
 if 'structured_summary' not in st.session_state:
     st.session_state.structured_summary = ''
 if 'summary_prompt' not in st.session_state:
-    st.session_state.summary_prompt = """I give you the transcription of an interview. It is a customer discovery call about a company,
-exploring what they do, their business needs, and their methods.
+    st.session_state.summary_prompt = """I give you the transcription of an interview. It is a customer discovery call about a company, exploring what they do, their business needs, and their methods.
 
 What I need is a structured summary of the interview for my notes. I want to keep every relevant piece of information that
 has been said, but ignore everything unimportant.
-Write the answers into bullet points and use exact wording when it matters. Do not add extra wording, but only what has been said.
+Go question by question and write the answers into bullet points and use exact wording when it matters. Do not add extra wording, but only what has been said.
+
 This is the transcript:"""
 
 st.title("Interview Transcription and Summarization")
