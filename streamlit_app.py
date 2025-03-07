@@ -37,26 +37,68 @@ def format_transcription(transcription, claude_api_key):
     except Exception as e:
         st.error(f"Error formatting transcription: {e}")
         return ""
-
-def summarize_transcription(structured_transcription, claude_api_key, summary_prompt):
+    
+def summarize_transcription(structured_transcription, api_key, summary_prompt, provider="claude", model=None):
+    """
+    Summarize transcription using either Claude or OpenAI models.
+    
+    Args:
+        structured_transcription (str): The transcription text to summarize
+        api_key (str): API key for the selected provider
+        summary_prompt (str): The prompt to guide the summarization
+        provider (str): Either "claude" or "openai"
+        model (str): Model to use (defaults to appropriate model if None)
+    
+    Returns:
+        str: The generated summary or empty string on failure
+    """
     if not structured_transcription:
         return ""
     
-    claude_prompt = f"""{summary_prompt}
+    prompt = f"""{summary_prompt}
 {structured_transcription}"""
     
     try:
-        client = anthropic.Anthropic(api_key=claude_api_key)
-        message = client.messages.create(
-            model='claude-3-7-sonnet-20250219',
-            max_tokens=8000,
-            temperature=0,
-            system="",
-            messages=[{"role": "user", "content": claude_prompt}]
-        )
-        return message.content[0].text
+        if provider.lower() == "claude":
+            import anthropic
+            
+            # Default to latest Claude model if none specified
+            claude_model = model or "claude-3-7-sonnet-20250219"
+            
+            client = anthropic.Anthropic(api_key=api_key)
+            message = client.messages.create(
+                model=claude_model,
+                max_tokens=8000,
+                temperature=0,
+                system="",
+                messages=[{"role": "user", "content": prompt}]
+            )
+            return message.content[0].text
+            
+        elif provider.lower() == "openai":
+            from openai import OpenAI
+            
+            # Default to GPT-4o if none specified
+            openai_model = model or "gpt-4o"
+            
+            client = OpenAI(api_key=api_key)
+            response = client.chat.completions.create(
+                model=openai_model,
+                temperature=0,
+                messages=[
+                    {"role": "system", "content": ""},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=4096  # Adjust as needed for your application
+            )
+            return response.choices[0].message.content
+            
+        else:
+            raise ValueError(f"Unsupported provider: {provider}. Use 'claude' or 'openai'.")
+            
     except Exception as e:
-        st.error(f"Error summarizing transcription: {e}")
+        import streamlit as st
+        st.error(f"Error summarizing transcription with {provider}: {e}")
         return ""
 
 # Page config for better appearance
@@ -87,9 +129,10 @@ if 'structured_summary' not in st.session_state:
 if 'summary_prompt' not in st.session_state:
     st.session_state.summary_prompt = """I give you the transcription of an interview. It is a customer discovery call about a company, exploring what they do, their business needs, and their methods.
 
-What I need is a structured summary of the interview for my notes. I want to keep every relevant piece of information that
-has been said, but ignore everything unimportant.
-Go question by question and write the answers into bullet points and use exact wording when it matters. Do not add extra wording, but only what has been said.
+I want to keep every relevant piece of information that has been said, but ignore everything unimportant.
+What I need is a summary of the interview for my notes. 
+Go question by question. Write the summary of the question and write the answers into bullet points. Shorten every answer, use keywords when possible.
+Use exact wording when it matters. Do not add extra wording, but only what has been said.
 
 This is the transcript:"""
 
@@ -132,7 +175,7 @@ with tab1:
     # Display the raw transcription if it exists
     if st.session_state.raw_transcription:
         st.subheader("Raw Transcription")
-        st.text_area("Raw transcription text", st.session_state.raw_transcription, height=200, disabled=True)
+        st.text_area("Raw transcription text", st.session_state.raw_transcription, height=200)
         
         # Format button appears after we have a raw transcription
         if st.button("Format Transcription"):
@@ -145,7 +188,8 @@ with tab1:
     # Display the formatted transcription if it exists
     if st.session_state.structured_transcription:
         st.subheader("Formatted Interview")
-        st.text_area("Formatted interview text", st.session_state.structured_transcription, height=300, disabled=True)
+        st.text_area("Formatted interview text", st.session_state.structured_transcription, height=300)
+
 
 with tab2:
     st.header("Summarize Interview")
@@ -162,14 +206,44 @@ with tab2:
             height=200
         )
         
+        # Model selection options
+        st.subheader("Select AI Model")
+        model_provider = st.radio("AI Provider", ["Claude", "OpenAI"])
+        
+        # Initialize model selection in session state if not present
+        if "selected_model" not in st.session_state:
+            st.session_state.selected_model = "claude-3-7-sonnet-20250219" if model_provider == "Claude" else "gpt-4o"
+        
+        # Display appropriate model options based on provider
+        if model_provider == "Claude":
+            claude_model = st.selectbox(
+                "Select Claude Model",
+                ["claude-3-7-sonnet-20250219", "claude-3-5-sonnet-20240620"],
+                index=0
+            )
+            st.session_state.selected_model = claude_model
+            api_key = claude_api_key
+            provider = "claude"
+        else:  # OpenAI
+            openai_model = st.selectbox(
+                "Select OpenAI Model",
+                ["gpt-4o", "gpt-4-turbo"],
+                index=0
+            )
+            st.session_state.selected_model = openai_model
+            api_key = openai_api_key  # Make sure you have this defined
+            provider = "openai"
+        
         # Button to generate/regenerate summary
         if st.button("Generate/Regenerate Summary"):
-            with st.spinner("Generating summary..."):
+            with st.spinner(f"Generating summary with {st.session_state.selected_model}..."):
                 st.session_state.summary_prompt = st.session_state.summary_prompt  # Save the edited prompt
                 st.session_state.structured_summary = summarize_transcription(
                     st.session_state.structured_transcription, 
-                    claude_api_key,
-                    st.session_state.summary_prompt
+                    api_key,
+                    st.session_state.summary_prompt,
+                    provider=provider,
+                    model=st.session_state.selected_model
                 )
                 if st.session_state.structured_summary:
                     st.success("Summary generated!")
@@ -178,7 +252,6 @@ with tab2:
         if st.session_state.structured_summary:
             st.subheader("Interview Summary")
             st.text_area("Summary", st.session_state.structured_summary, height=400)
-
 
 
 
