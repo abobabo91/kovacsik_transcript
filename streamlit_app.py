@@ -59,6 +59,23 @@ def summarize_transcription(structured_transcription, claude_api_key, summary_pr
         st.error(f"Error summarizing transcription: {e}")
         return ""
 
+# Function to handle the summary generation
+def generate_summary():
+    with st.spinner("Generating summary..."):
+        summary_prompt = st.session_state.current_summary_prompt
+        st.session_state.summary_prompt = summary_prompt  # Save the edited prompt
+        
+        structured_summary = summarize_transcription(
+            st.session_state.structured_transcription, 
+            claude_api_key,
+            summary_prompt
+        )
+        
+        if structured_summary:
+            st.session_state.structured_summary = structured_summary
+            return True
+        return False
+
 # Page config for better appearance
 st.set_page_config(page_title="Interview Transcription Tool", layout="wide")
 
@@ -85,13 +102,15 @@ if 'structured_transcription' not in st.session_state:
 if 'structured_summary' not in st.session_state:
     st.session_state.structured_summary = ''
 if 'summary_prompt' not in st.session_state:
-    st.session_state.summary_prompt = """I give you the transcription of an interview. It is a customer discovery call about a company, exploring what they do, their business needs, and their methods.
+    st.session_state.summary_prompt = """I give you the transcription of an interview. It is a customer discovery call about a company,
+exploring what they do, their business needs, and their methods.
 
 What I need is a structured summary of the interview for my notes. I want to keep every relevant piece of information that
 has been said, but ignore everything unimportant.
-Go question by question and write the answers into bullet points and use exact wording when it matters. Do not add extra wording, but only what has been said.
-
+Write the answers into bullet points and use exact wording when it matters. Do not add extra wording, but only what has been said.
 This is the transcript:"""
+if 'current_summary_prompt' not in st.session_state:
+    st.session_state.current_summary_prompt = st.session_state.summary_prompt
 
 st.title("Interview Transcription and Summarization")
 
@@ -155,33 +174,26 @@ with tab2:
     else:
         st.subheader("Customize Summary Prompt")
         
-        # Let user edit the summary prompt
-        st.session_state.summary_prompt = st.text_area(
-            "Edit the summary prompt below. Hit Ctrl + Enter to save.",
+        # Let user edit the summary prompt with callback for state management
+        st.text_area(
+            "Edit the summary prompt below",
             value=st.session_state.summary_prompt,
-            height=200
+            height=200,
+            key="current_summary_prompt"  # This connects the input to session state
         )
         
         # Button to generate/regenerate summary
         if st.button("Generate/Regenerate Summary"):
-            with st.spinner("Generating summary..."):
-                structured_summary = summarize_transcription(
-                    st.session_state.structured_transcription, 
-                    claude_api_key,
-                    st.session_state.summary_prompt
-                )
-                if structured_summary:
-                    st.session_state.structured_summary = structured_summary
-                    st.success("Summary generated!")
+            success = generate_summary()
+            if success:
+                st.success("Summary generated!")
+                # Force a rerun to update the display immediately
+                st.experimental_rerun()
         
         # Display the summary
         if st.session_state.structured_summary:
             st.subheader("Interview Summary")
-            st.text_area("Summary", st.session_state.structured_summary, height=400)
-
-
-
-
+            st.text_area("Summary", st.session_state.structured_summary, height=400, disabled=True)
 
 # Add download buttons for the outputs
 st.sidebar.header("Download Results")
