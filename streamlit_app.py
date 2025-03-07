@@ -64,6 +64,8 @@ def summarize_transcription(structured_transcription, api_key, summary_prompt, p
             return message.content[0].text
             
         elif provider.lower() == "openai":
+            from openai import OpenAI
+
             openai_model = model or "gpt-4o"
             client = OpenAI(api_key=api_key)
             
