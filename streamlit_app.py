@@ -3,22 +3,28 @@ import openai
 import anthropic
 import os
 
-def transcribe_and_format(audio_file, openai_api_key, claude_api_key):
-    # Step 1: Transcribe audio
+def transcribe_audio(audio_file, openai_api_key):
     try:
         openai_client = openai.OpenAI(api_key=openai_api_key)
         response = openai_client.audio.transcriptions.create(
             model="whisper-1",
             file=audio_file
         )
-        raw_transcription = response.text
-        
-        # Step 2: Format transcription
-        claude_prompt = f"""I want a transcript of an interview. 
-        I give you the continuous text, and your job is to make it a coherent interview text, without changing any wording. 
-        Just change the structure and keep the wording. Here is the text:
-{raw_transcription}"""
-        
+        return response.text
+    except Exception as e:
+        st.error(f"Error transcribing audio: {e}")
+        return None
+
+def format_transcription(transcription, claude_api_key):
+    if not transcription:
+        return ""
+    
+    claude_prompt = f"""I want a transcript of an interview. 
+    I give you the continuous text, and your job is to make it a coherent interview text, without changing any wording. 
+    Just change the structure and keep the wording. Here is the text:
+{transcription}"""
+    
+    try:
         claude_client = anthropic.Anthropic(api_key=claude_api_key)
         message = claude_client.messages.create(
             model='claude-3-7-sonnet-20250219',
@@ -27,12 +33,10 @@ def transcribe_and_format(audio_file, openai_api_key, claude_api_key):
             system="",
             messages=[{"role": "user", "content": claude_prompt}]
         )
-        formatted_transcription = message.content[0].text
-        
-        return raw_transcription, formatted_transcription
+        return message.content[0].text
     except Exception as e:
-        st.error(f"Error in transcription or formatting: {e}")
-        return None, None
+        st.error(f"Error formatting transcription: {e}")
+        return ""
 
 def summarize_transcription(structured_transcription, claude_api_key, summary_prompt):
     if not structured_transcription:
@@ -64,7 +68,7 @@ if 'openai' in st.secrets and 'OPENAI_API_KEY' in st.secrets['openai']:
 else:
     openai_api_key = st.sidebar.text_input("OpenAI API Key", type="password")
     if not openai_api_key:
-        st.warning("Please enter your OpenAI API key to enable transcription.")
+        st.warning("Please enter your OpenAI API key to enable audio transcription.")
 
 if 'claude' in st.secrets and 'CLAUDE_API_KEY' in st.secrets['claude']:
     claude_api_key = st.secrets['claude']["CLAUDE_API_KEY"]
@@ -81,16 +85,12 @@ if 'structured_transcription' not in st.session_state:
 if 'structured_summary' not in st.session_state:
     st.session_state.structured_summary = ''
 if 'summary_prompt' not in st.session_state:
-    st.session_state.summary_prompt = """I have an interview transcription from a customer discovery call. Please help me create a structured summary that:
+    st.session_state.summary_prompt = """I give you the transcription of an interview. It is a customer discovery call about a company,
+exploring what they do, their business needs, and their methods.
 
-Captures all relevant business information (company details, needs, methods, pain points)
-Organizes answers by question in bullet point format
-Uses direct quotes when the exact wording is significant
-Omits filler content, pleasantries, and irrelevant tangents
-Maintains the original meaning without adding interpretation
-
-Please provide the transcription, and I'll create a concise, organized summary that preserves all important information while eliminating unnecessary content.
-
+What I need is a structured summary of the interview for my notes. I want to keep every relevant piece of information that
+has been said, but ignore everything unimportant.
+Write the answers into bullet points and use exact wording when it matters. Do not add extra wording, but only what has been said.
 This is the transcript:"""
 
 st.title("Interview Transcription and Summarization")
@@ -99,40 +99,65 @@ st.title("Interview Transcription and Summarization")
 tab1, tab2 = st.tabs(["Transcribe & Format", "Summarize"])
 
 with tab1:
-    st.header("Transcribe and Format Audio")
-    uploaded_file = st.file_uploader("Upload an audio file", type=["mp3", "m4a", "wav"])
+    st.header("Get Interview Transcription")
     
-    if uploaded_file:
-        if st.button("Transcribe & Format Audio"):
-            with st.spinner("Transcribing and formatting audio..."):
-                raw_transcription, formatted_transcription = transcribe_and_format(uploaded_file, openai_api_key, claude_api_key)
-                if raw_transcription and formatted_transcription:
-                    st.session_state.raw_transcription = raw_transcription
+    # Create radio buttons for input method selection
+    input_method = st.radio(
+        "Choose input method:",
+        ["Upload Audio File", "Enter Text Directly"]
+    )
+    
+    if input_method == "Upload Audio File":
+        uploaded_file = st.file_uploader("Upload an audio file", type=["mp3", "m4a", "wav"])
+        
+        if uploaded_file:
+            if st.button("Transcribe Audio"):
+                with st.spinner("Transcribing audio..."):
+                    raw_transcription = transcribe_audio(uploaded_file, openai_api_key)
+                    if raw_transcription:
+                        st.session_state.raw_transcription = raw_transcription
+                        st.success("Transcription complete!")
+    
+    else:  # "Enter Text Directly"
+        raw_transcription_input = st.text_area(
+            "Enter your raw transcription text here:",
+            height=250,
+            value=st.session_state.raw_transcription
+        )
+        
+        if st.button("Use This Text"):
+            st.session_state.raw_transcription = raw_transcription_input
+            st.success("Text saved as raw transcription!")
+    
+    # Display the raw transcription if it exists
+    if st.session_state.raw_transcription:
+        st.subheader("Raw Transcription")
+        st.text_area("Raw transcription text", st.session_state.raw_transcription, height=200, disabled=True)
+        
+        # Format button appears after we have a raw transcription
+        if st.button("Format Transcription"):
+            with st.spinner("Formatting transcription..."):
+                formatted_transcription = format_transcription(st.session_state.raw_transcription, claude_api_key)
+                if formatted_transcription:
                     st.session_state.structured_transcription = formatted_transcription
-                    st.success("Transcription and formatting complete!")
+                    st.success("Formatting complete!")
     
-    if st.session_state.raw_transcription and st.session_state.structured_transcription:
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.subheader("Raw Transcription")
-            st.text_area("Raw transcription text", st.session_state.raw_transcription, height=300)
-        
-        with col2:
-            st.subheader("Formatted Interview")
-            st.text_area("Formatted interview text", st.session_state.structured_transcription, height=300)
+    # Display the formatted transcription if it exists
+    if st.session_state.structured_transcription:
+        st.subheader("Formatted Interview")
+        st.text_area("Formatted interview text", st.session_state.structured_transcription, height=300, disabled=True)
 
 with tab2:
     st.header("Summarize Interview")
     
     if not st.session_state.structured_transcription:
-        st.info("Please complete the transcription step first.")
+        st.info("Please complete the transcription and formatting steps first.")
     else:
         st.subheader("Customize Summary Prompt")
         
         # Let user edit the summary prompt
         summary_prompt = st.text_area(
-            "Edit the summary prompt below. Hit Ctrl + Enter to save.",
+            "Edit the summary prompt below",
             value=st.session_state.summary_prompt,
             height=200
         )
@@ -153,7 +178,7 @@ with tab2:
         # Display the summary
         if st.session_state.structured_summary:
             st.subheader("Interview Summary")
-            st.text_area("Summary", st.session_state.structured_summary, height=400)
+            st.text_area("Summary", st.session_state.structured_summary, height=400, disabled=True)
 
 # Add download buttons for the outputs
 st.sidebar.header("Download Results")
