@@ -39,19 +39,7 @@ def format_transcription(transcription, claude_api_key):
         return ""
     
 def summarize_transcription(structured_transcription, api_key, summary_prompt, provider="claude", model=None):
-    """
-    Summarize transcription using either Claude or OpenAI models.
-    
-    Args:
-        structured_transcription (str): The transcription text to summarize
-        api_key (str): API key for the selected provider
-        summary_prompt (str): The prompt to guide the summarization
-        provider (str): Either "claude" or "openai"
-        model (str): Model to use (defaults to appropriate model if None)
-    
-    Returns:
-        str: The generated summary or empty string on failure
-    """
+   
     if not structured_transcription:
         return ""
     
@@ -76,12 +64,12 @@ def summarize_transcription(structured_transcription, api_key, summary_prompt, p
             return message.content[0].text
             
         elif provider.lower() == "openai":
-            from openai import OpenAI
-            
-            # Default to GPT-4o if none specified
             openai_model = model or "gpt-4o"
-            
             client = OpenAI(api_key=api_key)
+            
+            # Determine whether to use max_tokens or max_completion_tokens
+            tokens_param = "max_completion_tokens" if any(m in openai_model for m in ["o1-", "o3-"]) else "max_tokens"
+            
             response = client.chat.completions.create(
                 model=openai_model,
                 temperature=0,
@@ -89,8 +77,9 @@ def summarize_transcription(structured_transcription, api_key, summary_prompt, p
                     {"role": "system", "content": ""},
                     {"role": "user", "content": prompt}
                 ],
-                max_tokens=4096  # Adjust as needed for your application
+                **{tokens_param: 8000}  # Dynamic parameter selection
             )
+            
             return response.choices[0].message.content
             
         else:
@@ -227,7 +216,7 @@ with tab2:
         else:  # OpenAI
             openai_model = st.selectbox(
                 "Select OpenAI Model",
-                ["gpt-4o-2024-08-06", "o1-2024-12-17", "o3-mini-2025-01-31", "gpt-4.5-preview"],
+                ["gpt-4o-2024-08-06", "o1-2024-12-17", "gpt-4.5-preview", "o3-mini-2025-01-31"],
                 index=0
             )
             st.session_state.selected_model = openai_model
