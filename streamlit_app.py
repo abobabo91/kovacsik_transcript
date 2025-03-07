@@ -74,7 +74,6 @@ def summarize_transcription(structured_transcription, api_key, summary_prompt, p
             
             response = client.chat.completions.create(
                 model=openai_model,
-                temperature=0,
                 messages=[
                     {"role": "system", "content": ""},
                     {"role": "user", "content": prompt}
