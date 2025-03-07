@@ -171,7 +171,7 @@ with tab2:
                     claude_api_key,
                     st.session_state.summary_prompt
                 )
-                if structured_summary:
+                if st.session_state.structured_summary:
                     st.success("Summary generated!")
         
         # Display the summary
