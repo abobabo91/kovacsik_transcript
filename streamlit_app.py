@@ -1,20 +1,58 @@
 import streamlit as st
 import openai
 import anthropic
+import google.generativeai as genai
 import os
+import tempfile
 
-def transcribe_audio(audio_file, openai_api_key):
+# Function to transcribe audio
+def transcribe_audio(audio_file, api_key, provider="openai", model="gpt-4o-transcribe"):
     try:
-        openai_client = openai.OpenAI(api_key=openai_api_key)
-        response = openai_client.audio.transcriptions.create(
-            model="whisper-1",
-            file=audio_file
-        )
-        return response.text
+        if provider.lower() == "openai":
+            client = openai.OpenAI(api_key=api_key)
+            # Both whisper-1 and gpt-4o-transcribe use the same endpoint structure
+            response = client.audio.transcriptions.create(
+                model=model,
+                file=audio_file
+            )
+            return response.text
+            
+        elif provider.lower() == "google":
+            genai.configure(api_key=api_key)
+            
+            # Create a temporary file to handle the uploaded audio data
+            # Gemini Python SDK often prefers file paths or specific blob handling
+            with tempfile.NamedTemporaryFile(delete=False, suffix=f".{audio_file.name.split('.')[-1]}") as tmp_file:
+                tmp_file.write(audio_file.getvalue())
+                tmp_file_path = tmp_file.name
+
+            try:
+                # Upload the file to Gemini
+                myfile = genai.upload_file(tmp_file_path)
+                
+                # Generate content using the audio file
+                model_instance = genai.GenerativeModel(model)
+                result = model_instance.generate_content([
+                    myfile, 
+                    "Generate a transcript of the speech."
+                ])
+                
+                return result.text
+            finally:
+                # Clean up temp file
+                if os.path.exists(tmp_file_path):
+                    os.unlink(tmp_file_path)
+                    
+        else:
+            st.error(f"Unsupported provider: {provider}")
+            return None
+            
     except Exception as e:
-        st.error(f"Error transcribing audio: {e}")
+        st.error(f"Error transcribing audio with {provider}: {e}")
         return None
 
+# Function to format transcription (using Claude as originally designed, or we could make this flexible too)
+# Keeping it Claude-focused as per original code unless specified, but user said "keep logic mostly"
 def format_transcription(transcription, claude_api_key):
     if not transcription:
         return ""
@@ -27,7 +65,7 @@ def format_transcription(transcription, claude_api_key):
     try:
         claude_client = anthropic.Anthropic(api_key=claude_api_key)
         message = claude_client.messages.create(
-            model='claude-3-7-sonnet-20250219',
+            model='claude-sonnet-4-5-20250929', # Updated to latest model
             max_tokens=8000,
             temperature=0,
             system="",
@@ -48,10 +86,8 @@ def summarize_transcription(structured_transcription, api_key, summary_prompt, p
     
     try:
         if provider.lower() == "claude":
-            import anthropic
-            
             # Default to latest Claude model if none specified
-            claude_model = model or "claude-3-7-sonnet-20250219"
+            claude_model = model or "claude-sonnet-4-5-20250929"
             
             client = anthropic.Anthropic(api_key=api_key)
             message = client.messages.create(
@@ -66,11 +102,11 @@ def summarize_transcription(structured_transcription, api_key, summary_prompt, p
         elif provider.lower() == "openai":
             from openai import OpenAI
 
-            openai_model = model or "gpt-4o"
+            openai_model = model or "gpt-5.1"
             client = OpenAI(api_key=api_key)
             
-            # Determine whether to use max_tokens or max_completion_tokens
-            tokens_param = "max_completion_tokens" if any(m in openai_model for m in ["o1-", "o3-"]) else "max_tokens"
+            # Determine whether to use max_tokens or max_completion_tokens (newer models prefer the latter)
+            tokens_param = "max_completion_tokens" if any(m in openai_model for m in ["o1", "o3", "gpt-5"]) else "max_tokens"
             
             response = client.chat.completions.create(
                 model=openai_model,
@@ -78,36 +114,44 @@ def summarize_transcription(structured_transcription, api_key, summary_prompt, p
                     {"role": "system", "content": ""},
                     {"role": "user", "content": prompt}
                 ],
-                **{tokens_param: 8000}  # Dynamic parameter selection
+                **{tokens_param: 8000} 
             )
             
             return response.choices[0].message.content
             
+        elif provider.lower() == "google":
+            genai.configure(api_key=api_key)
+            google_model_name = model or "gemini-3-pro-preview"
+            
+            model_instance = genai.GenerativeModel(google_model_name)
+            response = model_instance.generate_content(prompt)
+            return response.text
+
         else:
-            raise ValueError(f"Unsupported provider: {provider}. Use 'claude' or 'openai'.")
+            raise ValueError(f"Unsupported provider: {provider}. Use 'claude', 'openai', or 'google'.")
             
     except Exception as e:
-        import streamlit as st
         st.error(f"Error summarizing transcription with {provider}: {e}")
         return ""
 
 # Page config for better appearance
 st.set_page_config(page_title="Interview Transcription Tool", layout="wide")
 
-# API Keys
-if 'openai' in st.secrets and 'OPENAI_API_KEY' in st.secrets['openai']:
-    openai_api_key = st.secrets['openai']["OPENAI_API_KEY"]
-else:
-    openai_api_key = st.sidebar.text_input("OpenAI API Key", type="password")
-    if not openai_api_key:
-        st.warning("Please enter your OpenAI API key to enable audio transcription.")
+st.title("Interview Transcription and Summarization")
 
-if 'claude' in st.secrets and 'CLAUDE_API_KEY' in st.secrets['claude']:
-    claude_api_key = st.secrets['claude']["CLAUDE_API_KEY"]
-else:
-    claude_api_key = st.sidebar.text_input("Claude API Key", type="password")
-    if not claude_api_key:
-        st.warning("Please enter your Claude API key to enable formatting and summarization.")
+# --- API KEYS ---
+# Load API keys from Streamlit secrets
+openai_api_key = st.secrets.get("openai", {}).get("OPENAI_API_KEY", None)
+claude_api_key = st.secrets.get("anthropic", {}).get("ANTHROPIC_API_KEY", None)
+google_api_key = st.secrets.get("google", {}).get("GEMINI_API_KEY", None)
+
+# Display warning if keys are missing (optional, but helpful for debugging)
+if not openai_api_key:
+    st.sidebar.warning("OpenAI API Key not found in secrets (`[openai] OPENAI_API_KEY`).")
+if not claude_api_key:
+    st.sidebar.warning("Claude API Key not found in secrets (`[anthropic] ANTHROPIC_API_KEY`).")
+if not google_api_key:
+    st.sidebar.warning("Google Gemini API Key not found in secrets (`[google] GEMINI_API_KEY`).")
 
 # Initialize session state variables
 if 'raw_transcription' not in st.session_state:
@@ -126,8 +170,6 @@ Use exact wording when it matters. Do not add extra wording, but only what has b
 
 This is the transcript:"""
 
-st.title("Interview Transcription and Summarization")
-
 # Create tabs for a better UI experience
 tab1, tab2 = st.tabs(["Transcribe & Format", "Summarize"])
 
@@ -141,15 +183,45 @@ with tab1:
     )
     
     if input_method == "Upload Audio File":
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            transcription_provider = st.selectbox(
+                "Transcription Provider",
+                ["OpenAI", "Google"],
+                index=0
+            )
+            
+        with col2:
+            if transcription_provider == "OpenAI":
+                transcription_model = st.selectbox(
+                    "OpenAI Model",
+                    ["gpt-4o-transcribe", "whisper-1"],
+                    index=0,
+                    help="gpt-4o-transcribe is generally more accurate than whisper-1."
+                )
+                t_api_key = openai_api_key
+            else:
+                transcription_model = st.selectbox(
+                    "Google Model",
+                    ["gemini-2.5-flash", "gemini-3-pro-preview"],
+                    index=0,
+                    help="Gemini 2.5 Flash is fast and efficient for audio."
+                )
+                t_api_key = google_api_key
+
         uploaded_file = st.file_uploader("Upload an audio file", type=["mp3", "m4a", "wav"])
         
         if uploaded_file:
             if st.button("Transcribe Audio"):
-                with st.spinner("Transcribing audio..."):
-                    raw_transcription = transcribe_audio(uploaded_file, openai_api_key)
-                    if raw_transcription:
-                        st.session_state.raw_transcription = raw_transcription
-                        st.success("Transcription complete!")
+                if not t_api_key:
+                    st.error(f"Missing {transcription_provider} API Key. Please add it to your .streamlit/secrets.toml file.")
+                else:
+                    with st.spinner(f"Transcribing audio with {transcription_provider} ({transcription_model})..."):
+                        raw_transcription = transcribe_audio(uploaded_file, t_api_key, transcription_provider, transcription_model)
+                        if raw_transcription:
+                            st.session_state.raw_transcription = raw_transcription
+                            st.success("Transcription complete!")
     
     else:  # "Enter Text Directly"
         raw_transcription_input = st.text_area(
@@ -168,12 +240,15 @@ with tab1:
         st.text_area("Raw transcription text", st.session_state.raw_transcription, height=200)
         
         # Format button appears after we have a raw transcription
-        if st.button("Format Transcription"):
-            with st.spinner("Formatting transcription..."):
-                formatted_transcription = format_transcription(st.session_state.raw_transcription, claude_api_key)
-                if formatted_transcription:
-                    st.session_state.structured_transcription = formatted_transcription
-                    st.success("Formatting complete!")
+        if st.button("Format Transcription (Claude)"):
+            if not claude_api_key:
+                st.error("Missing Claude API Key. Please add it to your .streamlit/secrets.toml file for formatting.")
+            else:
+                with st.spinner("Formatting transcription with Claude..."):
+                    formatted_transcription = format_transcription(st.session_state.raw_transcription, claude_api_key)
+                    if formatted_transcription:
+                        st.session_state.structured_transcription = formatted_transcription
+                        st.success("Formatting complete!")
     
     # Display the formatted transcription if it exists
     if st.session_state.structured_transcription:
@@ -197,56 +272,77 @@ with tab2:
         )
         
         # Model selection options
-        st.subheader("Select AI Model")
-        model_provider = st.radio("AI Provider", ["Claude", "OpenAI"])
+        st.subheader("Select AI Model for Summarization")
         
-        # Initialize model selection in session state if not present
-        if "selected_model" not in st.session_state:
-            st.session_state.selected_model = "claude-3-7-sonnet-20250219" if model_provider == "Claude" else "gpt-4o"
+        col_prov, col_mod = st.columns(2)
         
-        # Display appropriate model options based on provider
-        if model_provider == "Claude":
-            claude_model = st.selectbox(
-                "Select Claude Model",
-                ["claude-3-7-sonnet-latest", "claude-3-5-sonnet-latest", "claude-3-5-haiku-latest"],
-                index=0
-            )
-            st.session_state.selected_model = claude_model
-            api_key = claude_api_key
-            provider = "claude"
-        else:  # OpenAI
-            openai_model = st.selectbox(
-                "Select OpenAI Model",
-                ["gpt-4o-2024-08-06", "o1-2024-12-17", "gpt-4.5-preview", "o3-mini-2025-01-31"],
-                index=0
-            )
-            st.session_state.selected_model = openai_model
-            api_key = openai_api_key  # Make sure you have this defined
-            provider = "openai"
+        with col_prov:
+            model_provider = st.radio("AI Provider", ["Claude", "OpenAI", "Google"])
+        
+        with col_mod:
+            # Display appropriate model options based on provider
+            if model_provider == "Claude":
+                # Latest Anthropic Models (Late 2025)
+                claude_model = st.selectbox(
+                    "Select Claude Model",
+                    [
+                        "claude-sonnet-4-5-20250929", 
+                        "claude-opus-4-5-20251101", 
+                        "claude-haiku-4-5-20251001"
+                    ],
+                    index=0,
+                    format_func=lambda x: x.split("-2025")[0].replace("-", " ").title() # Beautify names
+                )
+                st.session_state.selected_model = claude_model
+                api_key = claude_api_key
+                provider = "claude"
+                
+            elif model_provider == "OpenAI":
+                # Latest OpenAI Models (Late 2025)
+                openai_model = st.selectbox(
+                    "Select OpenAI Model",
+                    ["gpt-5.1", "gpt-4.1", "gpt-4o", "o3-mini", "o1"],
+                    index=0
+                )
+                st.session_state.selected_model = openai_model
+                api_key = openai_api_key
+                provider = "openai"
+                
+            else:  # Google
+                # Latest Google Models (Late 2025)
+                google_model = st.selectbox(
+                    "Select Google Model",
+                    ["gemini-3-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash"],
+                    index=0
+                )
+                st.session_state.selected_model = google_model
+                api_key = google_api_key
+                provider = "google"
         
         # Button to generate/regenerate summary
         if st.button("Generate/Regenerate Summary"):
-            with st.spinner(f"Generating summary with {st.session_state.selected_model}..."):
-                st.session_state.summary_prompt = st.session_state.summary_prompt  # Save the edited prompt
-                st.session_state.structured_summary = summarize_transcription(
-                    st.session_state.structured_transcription, 
-                    api_key,
-                    st.session_state.summary_prompt,
-                    provider=provider,
-                    model=st.session_state.selected_model
-                )
-                if st.session_state.structured_summary:
-                    st.success("Summary generated!")
+            if not api_key:
+                 st.error(f"Missing {model_provider} API Key. Please add it to your .streamlit/secrets.toml file.")
+            else:
+                with st.spinner(f"Generating summary with {st.session_state.selected_model}..."):
+                    st.session_state.summary_prompt = st.session_state.summary_prompt  # Save the edited prompt
+                    st.session_state.structured_summary = summarize_transcription(
+                        st.session_state.structured_transcription, 
+                        api_key,
+                        st.session_state.summary_prompt,
+                        provider=provider,
+                        model=st.session_state.selected_model
+                    )
+                    if st.session_state.structured_summary:
+                        st.success("Summary generated!")
         
         # Display the summary
         if st.session_state.structured_summary:
             st.subheader("Interview Summary")
             st.text_area("Summary", st.session_state.structured_summary, height=400)
 
-
-
-
 # Add download buttons for the outputs
+st.sidebar.markdown("---")
 st.sidebar.header("Download Results")
 
 if st.session_state.raw_transcription:

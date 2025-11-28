@@ -1,2 +1,4 @@
 openai
 anthropic
+google-generativeai
+streamlit
