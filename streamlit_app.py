@@ -6,14 +6,15 @@ import os
 import tempfile
 
 # Function to transcribe audio
-def transcribe_audio(audio_file, api_key, provider="openai", model="gpt-4o-transcribe"):
+def transcribe_audio(audio_file, api_key, provider="openai", model="gpt-4o-transcribe", language="en"):
     try:
         if provider.lower() == "openai":
             client = openai.OpenAI(api_key=api_key)
             # Both whisper-1 and gpt-4o-transcribe use the same endpoint structure
             response = client.audio.transcriptions.create(
                 model=model,
-                file=audio_file
+                file=audio_file,
+                language=language
             )
             return response.text
             
@@ -30,11 +31,15 @@ def transcribe_audio(audio_file, api_key, provider="openai", model="gpt-4o-trans
                 # Upload the file to Gemini
                 myfile = genai.upload_file(tmp_file_path)
                 
+                # Map language code to full name for better prompting
+                lang_map = {"en": "English", "hu": "Hungarian"}
+                lang_full = lang_map.get(language, "English")
+
                 # Generate content using the audio file
                 model_instance = genai.GenerativeModel(model)
                 result = model_instance.generate_content([
                     myfile, 
-                    "Generate a transcript of the speech."
+                    f"Generate a transcript of the speech. The language is {lang_full}."
                 ])
                 
                 return result.text
@@ -192,6 +197,14 @@ with tab1:
                 index=0
             )
             
+            language_options = {"English": "en", "Hungarian": "hu"}
+            selected_language_label = st.selectbox(
+                "Language",
+                list(language_options.keys()),
+                index=0
+            )
+            selected_language = language_options[selected_language_label]
+            
         with col2:
             if transcription_provider == "OpenAI":
                 transcription_model = st.selectbox(
@@ -218,7 +231,7 @@ with tab1:
                     st.error(f"Missing {transcription_provider} API Key. Please add it to your .streamlit/secrets.toml file.")
                 else:
                     with st.spinner(f"Transcribing audio with {transcription_provider} ({transcription_model})..."):
-                        raw_transcription = transcribe_audio(uploaded_file, t_api_key, transcription_provider, transcription_model)
+                        raw_transcription = transcribe_audio(uploaded_file, t_api_key, transcription_provider, transcription_model, selected_language)
                         if raw_transcription:
                             st.session_state.raw_transcription = raw_transcription
                             st.success("Transcription complete!")
