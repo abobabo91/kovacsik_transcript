@@ -165,6 +165,12 @@ if 'structured_transcription' not in st.session_state:
     st.session_state.structured_transcription = ''
 if 'structured_summary' not in st.session_state:
     st.session_state.structured_summary = ''
+if 'last_processed_file' not in st.session_state:
+    st.session_state.last_processed_file = None
+if 'summary_model_provider' not in st.session_state:
+    st.session_state.summary_model_provider = "Claude"
+if 'summary_selected_model' not in st.session_state:
+    st.session_state.summary_selected_model = "claude-sonnet-4-5-20250929" # Default
 if 'summary_prompt' not in st.session_state:
     st.session_state.summary_prompt = """I give you the transcription of an interview. It is a customer discovery call about a company, exploring what they do, their business needs, and their methods.
 
@@ -226,16 +232,78 @@ with tab1:
         uploaded_file = st.file_uploader("Upload an audio file", type=["mp3", "m4a", "wav"])
         
         if uploaded_file:
-            if st.button("Transcribe Audio"):
+            # Check if this file is new and needs processing
+            file_changed = False
+            if st.session_state.last_processed_file != uploaded_file.name:
+                file_changed = True
+                
+            # If it's a new file, or if we have no transcription yet, run the end-to-end process
+            # (User said "when i upload... runs end to end")
+            if file_changed:
                 if not t_api_key:
                     st.error(f"Missing {transcription_provider} API Key. Please add it to your .streamlit/secrets.toml file.")
                 else:
-                    with st.spinner(f"Transcribing audio with {transcription_provider} ({transcription_model})..."):
+                    status_container = st.empty()
+                    try:
+                        # 1. Transcribe
+                        status_container.info(f"Step 1/3: Transcribing audio with {transcription_provider} ({transcription_model})...")
+                        # Reset file pointer just in case
+                        uploaded_file.seek(0)
+                        
                         raw_transcription = transcribe_audio(uploaded_file, t_api_key, transcription_provider, transcription_model, selected_language)
+                        
                         if raw_transcription:
                             st.session_state.raw_transcription = raw_transcription
-                            st.success("Transcription complete!")
-    
+                            
+                            # 2. Format
+                            status_container.info("Step 2/3: Formatting transcription with Claude...")
+                            if not claude_api_key:
+                                st.warning("Missing Claude API Key. Skipping formatting and summarization.")
+                            else:
+                                formatted_transcription = format_transcription(raw_transcription, claude_api_key)
+                                if formatted_transcription:
+                                    st.session_state.structured_transcription = formatted_transcription
+                                    
+                                    # 3. Summarize
+                                    status_container.info("Step 3/3: Generating summary...")
+                                    
+                                    # Determine keys/providers for summary from session state defaults
+                                    summ_provider = st.session_state.summary_model_provider
+                                    summ_model = st.session_state.summary_selected_model
+                                    
+                                    # Get appropriate API key for summary
+                                    summ_api_key = None
+                                    if summ_provider == "Claude":
+                                        summ_api_key = claude_api_key
+                                    elif summ_provider == "OpenAI":
+                                        summ_api_key = openai_api_key
+                                    elif summ_provider == "Google":
+                                        summ_api_key = google_api_key
+                                        
+                                    if not summ_api_key:
+                                        st.warning(f"Missing {summ_provider} API Key. Skipping summarization.")
+                                    else:
+                                        summary = summarize_transcription(
+                                            formatted_transcription, 
+                                            summ_api_key,
+                                            st.session_state.summary_prompt,
+                                            provider=summ_provider,
+                                            model=summ_model
+                                        )
+                                        if summary:
+                                            st.session_state.structured_summary = summary
+                                            st.session_state.last_processed_file = uploaded_file.name
+                                            status_container.success("Processing Complete! (Transcription -> Formatting -> Summary)")
+                                        else:
+                                            status_container.error("Summarization failed.")
+                                else:
+                                    status_container.error("Formatting failed.")
+                        else:
+                            status_container.error("Transcription failed.")
+                            
+                    except Exception as e:
+                        status_container.error(f"An error occurred during processing: {e}")
+
     else:  # "Enter Text Directly"
         raw_transcription_input = st.text_area(
             "Enter your raw transcription text here:",
@@ -252,8 +320,8 @@ with tab1:
         st.subheader("Raw Transcription")
         st.text_area("Raw transcription text", st.session_state.raw_transcription, height=200)
         
-        # Format button appears after we have a raw transcription
-        if st.button("Format Transcription (Claude)"):
+        # Regenerate Formatting button
+        if st.button("Regenerate Formatting (Claude)"):
             if not claude_api_key:
                 st.error("Missing Claude API Key. Please add it to your .streamlit/secrets.toml file for formatting.")
             else:
@@ -290,7 +358,12 @@ with tab2:
         col_prov, col_mod = st.columns(2)
         
         with col_prov:
-            model_provider = st.radio("AI Provider", ["Claude", "OpenAI", "Google"])
+            # Use session state to persist selection
+            model_provider = st.radio(
+                "AI Provider", 
+                ["Claude", "OpenAI", "Google"],
+                key="summary_model_provider"
+            )
         
         with col_mod:
             # Display appropriate model options based on provider
@@ -304,9 +377,10 @@ with tab2:
                         "claude-haiku-4-5-20251001"
                     ],
                     index=0,
-                    format_func=lambda x: x.split("-2025")[0].replace("-", " ").title() # Beautify names
+                    format_func=lambda x: x.split("-2025")[0].replace("-", " ").title(), # Beautify names
+                    key="summary_model_claude"
                 )
-                st.session_state.selected_model = claude_model
+                st.session_state.summary_selected_model = claude_model
                 api_key = claude_api_key
                 provider = "claude"
                 
@@ -315,9 +389,10 @@ with tab2:
                 openai_model = st.selectbox(
                     "Select OpenAI Model",
                     ["gpt-5.1", "gpt-4.1", "gpt-4o", "o3-mini", "o1"],
-                    index=0
+                    index=0,
+                    key="summary_model_openai"
                 )
-                st.session_state.selected_model = openai_model
+                st.session_state.summary_selected_model = openai_model
                 api_key = openai_api_key
                 provider = "openai"
                 
@@ -326,25 +401,26 @@ with tab2:
                 google_model = st.selectbox(
                     "Select Google Model",
                     ["gemini-3-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash"],
-                    index=0
+                    index=0,
+                    key="summary_model_google"
                 )
-                st.session_state.selected_model = google_model
+                st.session_state.summary_selected_model = google_model
                 api_key = google_api_key
                 provider = "google"
         
         # Button to generate/regenerate summary
-        if st.button("Generate/Regenerate Summary"):
+        if st.button("Regenerate Summary"):
             if not api_key:
                  st.error(f"Missing {model_provider} API Key. Please add it to your .streamlit/secrets.toml file.")
             else:
-                with st.spinner(f"Generating summary with {st.session_state.selected_model}..."):
+                with st.spinner(f"Generating summary with {st.session_state.summary_selected_model}..."):
                     st.session_state.summary_prompt = st.session_state.summary_prompt  # Save the edited prompt
                     st.session_state.structured_summary = summarize_transcription(
                         st.session_state.structured_transcription, 
                         api_key,
                         st.session_state.summary_prompt,
                         provider=provider,
-                        model=st.session_state.selected_model
+                        model=st.session_state.summary_selected_model
                     )
                     if st.session_state.structured_summary:
                         st.success("Summary generated!")
