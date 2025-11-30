@@ -411,7 +411,7 @@ with tab1:
 
         st.subheader("Upload an audio file")
 
-        uploaded_file = st.file_uploader("", type=["mp3", "m4a", "wav"])
+        uploaded_file = st.file_uploader("Upload an audio file", type=["mp3", "m4a", "wav"], label_visibility="collapsed")
         
         start_processing = st.button("Start Transcription")
 
