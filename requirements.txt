@@ -2,3 +2,4 @@ openai
 anthropic
 google-generativeai
 streamlit
+pydub
