@@ -262,14 +262,17 @@ st.title("Interview Transcription and Summarization")
 
 # --- API KEYS ---
 # Load API keys from Streamlit secrets
-try:
-    openai_api_key = st.secrets.get("openai", {}).get("OPENAI_API_KEY", None)
-    claude_api_key = st.secrets.get("anthropic", {}).get("ANTHROPIC_API_KEY", None)
-    google_api_key = st.secrets.get("google", {}).get("GEMINI_API_KEY", None)
-except Exception:
-    openai_api_key = None
-    claude_api_key = None
-    google_api_key = None
+openai_api_key = st.secrets.get("openai", {}).get("OPENAI_API_KEY", None)
+claude_api_key = st.secrets.get("anthropic", {}).get("ANTHROPIC_API_KEY", None)
+google_api_key = st.secrets.get("google", {}).get("GEMINI_API_KEY", None)
+
+# Display warning if keys are missing (optional, but helpful for debugging)
+if not openai_api_key:
+    st.sidebar.warning("OpenAI API Key not found in secrets (`[openai] OPENAI_API_KEY`).")
+if not claude_api_key:
+    st.sidebar.warning("Claude API Key not found in secrets (`[anthropic] ANTHROPIC_API_KEY`).")
+if not google_api_key:
+    st.sidebar.warning("Google Gemini API Key not found in secrets (`[google] GEMINI_API_KEY`).")
 
 # Initialize session state variables
 if 'raw_transcription' not in st.session_state:
@@ -317,7 +320,7 @@ with tab1:
     # Create radio buttons for input method selection
     input_method = st.radio(
         "Choose input method:",
-        ["Upload Audio File", "Enter Text Directly", "Upload Text File"]
+        ["Upload Audio File", "Enter Text Directly"]
     )
     
     if input_method == "Upload Audio File":
@@ -442,13 +445,6 @@ with tab1:
                                     st.rerun()
 
                     st.text_area("Raw transcription text", st.session_state.raw_transcription, height=200, key="raw_text_area_disp")
-                    st.download_button(
-                        label="Download Raw Transcription",
-                        data=st.session_state.raw_transcription,
-                        file_name="raw_transcription.txt",
-                        mime="text/plain",
-                        key="dl_raw_main"
-                    )
                     
         def display_formatted(container):
             if st.session_state.structured_transcription:
@@ -471,13 +467,6 @@ with tab1:
                                     st.rerun()
 
                     st.text_area("Formatted interview text", st.session_state.structured_transcription, height=300, key="fmt_text_area_disp")
-                    st.download_button(
-                        label="Download Formatted Interview",
-                        data=st.session_state.structured_transcription,
-                        file_name="formatted_interview.txt",
-                        mime="text/plain",
-                        key="dl_fmt_main"
-                    )
 
         def display_summary(container):
             if st.session_state.structured_summary:
@@ -515,13 +504,6 @@ with tab1:
                                     st.rerun()
 
                     st.text_area("Summary", st.session_state.structured_summary, height=400, key="sum_text_area_disp")
-                    st.download_button(
-                        label="Download Summary",
-                        data=st.session_state.structured_summary,
-                        file_name="interview_summary.txt",
-                        mime="text/plain",
-                        key="dl_sum_main"
-                    )
 
         processing_happened = False
 
@@ -608,7 +590,7 @@ with tab1:
             display_formatted(formatted_container)
             display_summary(summary_container)
 
-    elif input_method == "Enter Text Directly":
+    else:  # "Enter Text Directly"
         # Formatting Options for Text Input
         st.subheader("Language Model Settings")
         f_col1, f_col2 = st.columns(2)
@@ -656,32 +638,8 @@ with tab1:
         if st.button("Use This Text"):
             st.session_state.raw_transcription = raw_transcription_input
             st.success("Text saved as raw transcription!")
+    
 
-    else: # "Upload Text File"
-        st.subheader("Upload a .txt file")
-        uploaded_txt = st.file_uploader("Upload a text file", type=["txt"], label_visibility="collapsed")
-        
-        if uploaded_txt:
-            # Read the text file
-            text_content = uploaded_txt.getvalue().decode("utf-8")
-            
-            st.info("What would you like to do with this text?")
-            col_u1, col_u2, col_u3 = st.columns(3)
-            
-            if col_u1.button("Set as Raw Transcription"):
-                st.session_state.raw_transcription = text_content
-                st.success("Text set as Raw Transcription!")
-                st.rerun()
-                
-            if col_u2.button("Set as Formatted Interview"):
-                st.session_state.structured_transcription = text_content
-                st.success("Text set as Formatted Interview!")
-                st.rerun()
-                
-            if col_u3.button("Set as Summary"):
-                st.session_state.structured_summary = text_content
-                st.success("Text set as Summary!")
-                st.rerun()
 
 with tab2:
     st.header("Summarize Interview")
@@ -774,14 +732,7 @@ with tab2:
         # Display the summary
         if st.session_state.structured_summary:
             st.subheader("Interview Summary")
-            st.text_area("Summary", st.session_state.structured_summary, height=400, key="sum_text_area_tab2")
-            st.download_button(
-                label="Download Summary",
-                data=st.session_state.structured_summary,
-                file_name="interview_summary.txt",
-                mime="text/plain",
-                key="dl_sum_tab2"
-            )
+            st.text_area("Summary", st.session_state.structured_summary, height=400)
 
 # Add download buttons for the outputs
 st.sidebar.markdown("---")
@@ -792,8 +743,7 @@ if st.session_state.raw_transcription:
         label="Download Raw Transcription",
         data=st.session_state.raw_transcription,
         file_name="raw_transcription.txt",
-        mime="text/plain",
-        key="dl_raw_sidebar"
+        mime="text/plain"
     )
 
 if st.session_state.structured_transcription:
@@ -801,8 +751,7 @@ if st.session_state.structured_transcription:
         label="Download Formatted Interview",
         data=st.session_state.structured_transcription,
         file_name="formatted_interview.txt",
-        mime="text/plain",
-        key="dl_fmt_sidebar"
+        mime="text/plain"
     )
 
 if st.session_state.structured_summary:
@@ -810,14 +759,5 @@ if st.session_state.structured_summary:
         label="Download Summary",
         data=st.session_state.structured_summary,
         file_name="interview_summary.txt",
-        mime="text/plain",
-        key="dl_sum_sidebar"
+        mime="text/plain"
     )
-
-# Display warning if keys are missing (optional, but helpful for debugging)
-if not openai_api_key:
-    st.sidebar.warning("OpenAI API Key not found in secrets (`[openai] OPENAI_API_KEY`).")
-if not claude_api_key:
-    st.sidebar.warning("Claude API Key not found in secrets (`[anthropic] ANTHROPIC_API_KEY`).")
-if not google_api_key:
-    st.sidebar.warning("Google Gemini API Key not found in secrets (`[google] GEMINI_API_KEY`).")
