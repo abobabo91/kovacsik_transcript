@@ -45,9 +45,9 @@ def extract_text_from_pdf(uploaded_file):
                 # back to PIL for pytesseract
                 img_pil = Image.fromarray(img)
 
-                # OCR with Hungarian language, PSM 3
+                # OCR with English language, PSM 3
                 custom_config = r'--psm 3'
-                text = pytesseract.image_to_string(img_pil, lang="hun", config=custom_config)
+                text = pytesseract.image_to_string(img_pil, lang="eng", config=custom_config)
                 pdf_content += text + "\n"
 
                 # memóriatisztítás
