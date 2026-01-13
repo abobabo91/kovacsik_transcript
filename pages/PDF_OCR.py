@@ -10,14 +10,18 @@ from io import BytesIO
 import cv2
 from PIL import Image
 
-def extract_text_from_pdf(uploaded_file):
+def extract_text_from_pdf(uploaded_file, contrast=1.0, brightness=0, page_limit=0, use_adaptive=False):
     file_name = uploaded_file.name
     pdf_content = ""
 
     # 1) Sima szövegkinyerés
     try:
         pdf_reader = PyPDF2.PdfReader(uploaded_file)
-        for page in pdf_reader.pages:
+        pages_to_process = pdf_reader.pages
+        if page_limit > 0:
+            pages_to_process = pages_to_process[:page_limit]
+        
+        for page in pages_to_process:
             pdf_content += page.extract_text() or ""
     except Exception as e:
         st.error(f"Hiba a(z) {file_name} fájl olvasásakor: {e}")
@@ -31,16 +35,30 @@ def extract_text_from_pdf(uploaded_file):
             file_bytes = uploaded_file.read()
 
             # determine number of pages
-            num_pages = len(PyPDF2.PdfReader(BytesIO(file_bytes)).pages)
+            total_pages = len(PyPDF2.PdfReader(BytesIO(file_bytes)).pages)
+            num_pages = total_pages
+            if page_limit > 0:
+                num_pages = min(page_limit, total_pages)
 
             progress = st.progress(0)
             for i in range(1, num_pages + 1):
                 # higher DPI for sharper OCR
                 images = convert_from_bytes(file_bytes, dpi=300, first_page=i, last_page=i)
 
-                # --- OpenCV preprocessing with Otsu threshold ---
+                # --- OpenCV preprocessing ---
                 img = cv2.cvtColor(np.array(images[0]), cv2.COLOR_RGB2GRAY)
-                _, img = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                
+                # Apply Contrast and Brightness
+                # new_img = alpha * old_img + beta
+                img = cv2.convertScaleAbs(img, alpha=contrast, beta=brightness)
+                
+                if use_adaptive:
+                    # Adaptive thresholding handles varying lighting/dark backgrounds better
+                    img = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                              cv2.THRESH_BINARY, 11, 2)
+                else:
+                    # Otsu thresholding for standard black-on-white text
+                    _, img = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
                 # back to PIL for pytesseract
                 img_pil = Image.fromarray(img)
@@ -77,11 +95,18 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("PDF feltöltése és OCR")
-    uploaded_file = st.file_uploader("Válassz egy PDF fájlt", type=["pdf"])
+    
+    with st.expander("OCR Beállítások", expanded=False):
+        contrast = st.slider("Kontraszt", 0.5, 3.0, 1.5, 0.1, help="Növeld, ha a szöveg halvány.")
+        brightness = st.slider("Fényerő", -100, 100, 0, 5, help="Növeld, ha a kép túl sötét.")
+        use_adaptive = st.checkbox("Adaptív küszöbölés", value=False, help="Kapcsold be sötét hátterű vagy rossz megvilágítású képeknél.")
+        page_limit = st.number_input("Csak az első X oldal feldolgozása (0 = összes)", min_value=0, value=0)
+
+    uploaded_file = st.file_uploader("Válassz een PDF fájlt", type=["pdf"])
     if uploaded_file:
         if st.button("Kinyerés indítása"):
             with st.spinner("Feldolgozás..."):
-                text = extract_text_from_pdf(uploaded_file)
+                text = extract_text_from_pdf(uploaded_file, contrast=contrast, brightness=brightness, page_limit=page_limit, use_adaptive=use_adaptive)
                 if text:
                     st.session_state.extracted_text = text
                     st.success("Szöveg sikeresen kinyerve!")
