@@ -256,7 +256,7 @@ def summarize_transcription(structured_transcription, api_key, summary_prompt, p
         return ""
 
 # Page config for better appearance
-st.set_page_config(page_title="Interview Transcription Tool", layout="wide")
+# st.set_page_config(page_title="Interview Transcription Tool", layout="wide")
 
 st.title("Interview Transcription and Summarization")
 
