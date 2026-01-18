@@ -3,10 +3,4 @@ anthropic
 google-generativeai
 streamlit
 pydub
-pandas
-numpy
-PyPDF2
-pytesseract
-pdf2image
-opencv-python-headless
 tiktoken
