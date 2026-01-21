@@ -315,7 +315,7 @@ Obviously, you have both a novelty search and an FTO analysis, but for one, it's
 **Respondent:** Yeah. So it's also not very fulfilling when you're done. It's never really complete.
 "
 
-This would be an ideal output, in this exact format:
+The following would be an ideal output, in this exact format (no bold font):
 
 "
 - Is FTO search and analysis something you do regularly?
