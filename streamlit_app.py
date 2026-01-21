@@ -10,80 +10,64 @@ from pydub.utils import make_chunks
 # Function to transcribe audio
 def transcribe_audio(audio_file, api_key, provider="openai", model="gpt-4o-transcribe", language="en", limit_minutes=0):
     try:
+        # Initial trimming logic (shared for both providers)
+        processed_audio_file = audio_file
+        temp_trimmed_path = None
+        
+        if limit_minutes > 0:
+            try:
+                st.warning(f"Trimming audio to first {limit_minutes} minutes...")
+                audio = AudioSegment.from_file(audio_file)
+                limit_ms = limit_minutes * 60 * 1000
+                audio = audio[:limit_ms]
+                
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
+                    temp_trimmed_path = tmp_file.name
+                
+                audio.export(temp_trimmed_path, format="mp3", bitrate="192k")
+                processed_audio_file = open(temp_trimmed_path, "rb")
+            except Exception as e:
+                st.error(f"Error trimming audio: {e}")
+                # Fall back to original file if trimming fails
+                processed_audio_file = audio_file
+
         if provider.lower() == "openai":
             client = openai.OpenAI(api_key=api_key)
             
             # Check file size (OpenAI limit is 25MB)
-            audio_file.seek(0, os.SEEK_END)
-            file_size = audio_file.tell()
-            audio_file.seek(0)
+            processed_audio_file.seek(0, os.SEEK_END)
+            file_size = processed_audio_file.tell()
+            processed_audio_file.seek(0)
             
-            limit_bytes = 10 * 1024 * 1024  # 25 MB
+            limit_bytes = 10 * 1024 * 1024  # OpenAI limit is actually 25MB, but we use a safer limit for processing
             
-            # Determine if we need to use pydub (for trimming or splitting)
-            use_pydub = (limit_minutes > 0) or (file_size > limit_bytes)
+            # Determine if we need to split (if duration > 10 mins or size > limit)
+            # 10 mins of high quality audio is safe for 25MB limit
+            chunk_length_ms = 10 * 60 * 1000
             
-            if use_pydub:
-                status_msg = "Processing audio..."
+            # If we already trimmed it and it's small enough, we might not need further processing
+            # But the original code had splitting logic for large files.
+            
+            try:
+                # We need pydub if it's still too large
                 if file_size > limit_bytes:
-                    status_msg = f"File size ({file_size / (1024*1024):.2f} MB) exceeds OpenAI 25MB limit."
-                if limit_minutes > 0:
-                    status_msg += f" Trimming to first {limit_minutes} minutes."
-                
-                st.warning(status_msg)
-                
-                full_transcript = ""
-                try:
-                    # Load audio using pydub
-                    audio = AudioSegment.from_file(audio_file)
+                    st.warning(f"File size ({file_size / (1024*1024):.2f} MB) exceeds limit. Splitting into chunks...")
                     
-                    # Trim if needed
-                    if limit_minutes > 0:
-                        limit_ms = limit_minutes * 60 * 1000
-                        audio = audio[:limit_ms]
+                    audio = AudioSegment.from_file(processed_audio_file)
+                    full_transcript = ""
                     
-                    # Check if we still need to split (if duration > 10 mins)
-                    # 10 mins of high quality audio is safe for 25MB limit
-                    chunk_length_ms = 10 * 60 * 1000
+                    chunks = make_chunks(audio, chunk_length_ms)
+                    st.info(f"Audio duration: {len(audio)/60000:.1f} mins. Split into {len(chunks)} chunks for transcription.")
                     
-                    if len(audio) > chunk_length_ms:
-                        chunks = make_chunks(audio, chunk_length_ms)
-                        st.info(f"Audio duration: {len(audio)/60000:.1f} mins. Split into {len(chunks)} chunks for transcription.")
-                        
-                        progress_bar = st.progress(0)
-                        
-                        for i, chunk in enumerate(chunks):
-                            chunk_temp_path = None
-                            try:
-                                with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
-                                    chunk_temp_path = tmp_file.name
-                                
-                                # Export chunk (using mp3 high quality to minimize loss)
-                                chunk.export(chunk_temp_path, format="mp3", bitrate="192k")
-                                
-                                with open(chunk_temp_path, "rb") as audio_chunk_file:
-                                    response = client.audio.transcriptions.create(
-                                        model=model,
-                                        file=audio_chunk_file,
-                                        language=language
-                                    )
-                                    full_transcript += response.text + " "
-                                    
-                            finally:
-                                if chunk_temp_path and os.path.exists(chunk_temp_path):
-                                    os.unlink(chunk_temp_path)
-                            
-                            # Update progress
-                            progress_bar.progress((i + 1) / len(chunks))
-                    else:
-                        # Short enough to send as single file (but processed via pydub)
-                        st.info(f"Audio duration: {len(audio)/60000:.1f} mins. Transcribing...")
+                    progress_bar = st.progress(0)
+                    
+                    for i, chunk in enumerate(chunks):
                         chunk_temp_path = None
                         try:
                             with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_file:
                                 chunk_temp_path = tmp_file.name
                             
-                            audio.export(chunk_temp_path, format="mp3", bitrate="192k")
+                            chunk.export(chunk_temp_path, format="mp3", bitrate="192k")
                             
                             with open(chunk_temp_path, "rb") as audio_chunk_file:
                                 response = client.audio.transcriptions.create(
@@ -91,32 +75,41 @@ def transcribe_audio(audio_file, api_key, provider="openai", model="gpt-4o-trans
                                     file=audio_chunk_file,
                                     language=language
                                 )
-                                full_transcript = response.text
+                                full_transcript += response.text + " "
+                                
                         finally:
                             if chunk_temp_path and os.path.exists(chunk_temp_path):
                                 os.unlink(chunk_temp_path)
                         
-                    return full_transcript.strip()
+                        progress_bar.progress((i + 1) / len(chunks))
                     
-                except Exception as e:
-                    st.error(f"Error processing audio: {e}")
-                    return None
-            else:
-                # Process normally if small enough and no limit
-                response = client.audio.transcriptions.create(
-                    model=model,
-                    file=audio_file,
-                    language=language
-                )
-                return response.text
+                    return full_transcript.strip()
+                else:
+                    # Process as single file
+                    response = client.audio.transcriptions.create(
+                        model=model,
+                        file=processed_audio_file,
+                        language=language
+                    )
+                    return response.text
+            finally:
+                # If we opened a new file for the trimmed version, close it
+                if temp_trimmed_path and processed_audio_file != audio_file:
+                    processed_audio_file.close()
+                    if os.path.exists(temp_trimmed_path):
+                        os.unlink(temp_trimmed_path)
             
         elif provider.lower() == "google":
             genai.configure(api_key=api_key)
             
             # Create a temporary file to handle the uploaded audio data
-            # Gemini Python SDK often prefers file paths or specific blob handling
-            with tempfile.NamedTemporaryFile(delete=False, suffix=f".{audio_file.name.split('.')[-1]}") as tmp_file:
-                tmp_file.write(audio_file.getvalue())
+            suffix = f".{audio_file.name.split('.')[-1]}" if hasattr(audio_file, 'name') else ".mp3"
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
+                if hasattr(processed_audio_file, 'read'):
+                    processed_audio_file.seek(0)
+                    tmp_file.write(processed_audio_file.read())
+                else:
+                    tmp_file.write(processed_audio_file.getvalue())
                 tmp_file_path = tmp_file.name
 
             try:
@@ -139,6 +132,12 @@ def transcribe_audio(audio_file, api_key, provider="openai", model="gpt-4o-trans
                 # Clean up temp file
                 if os.path.exists(tmp_file_path):
                     os.unlink(tmp_file_path)
+                
+                # If we opened a new file for the trimmed version, close it
+                if temp_trimmed_path and processed_audio_file != audio_file:
+                    processed_audio_file.close()
+                    if os.path.exists(temp_trimmed_path):
+                        os.unlink(temp_trimmed_path)
                     
         else:
             st.error(f"Unsupported provider: {provider}")
