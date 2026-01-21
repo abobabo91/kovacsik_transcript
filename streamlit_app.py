@@ -18,7 +18,7 @@ def transcribe_audio(audio_file, api_key, provider="openai", model="gpt-4o-trans
             file_size = audio_file.tell()
             audio_file.seek(0)
             
-            limit_bytes = 25 * 1024 * 1024  # 25 MB
+            limit_bytes = 10 * 1024 * 1024  # 25 MB
             
             # Determine if we need to use pydub (for trimming or splitting)
             use_pydub = (limit_minutes > 0) or (file_size > limit_bytes)
@@ -284,7 +284,7 @@ if 'structured_summary' not in st.session_state:
 if 'last_processed_file' not in st.session_state:
     st.session_state.last_processed_file = None
 if 'summary_model_provider' not in st.session_state:
-    st.session_state.summary_model_provider = "Claude"
+    st.session_state.summary_model_provider = "Google"
 # summary_selected_model removed in favor of dynamic resolution
 if 'summary_prompt' not in st.session_state:
     st.session_state.summary_prompt = """I give you the transcription of an interview. It is a customer discovery call about a company, exploring what they do, their business needs, and their methods.
@@ -294,12 +294,51 @@ What I need is a summary of the interview for my notes.
 Go question by question. Write the summary of the question and write the answers into bullet points. Shorten every answer, use keywords when possible.
 Use exact wording when it matters. Do not add extra wording, but only what has been said.
 
-This is the transcript:"""
+For example from this transcription:
+
+"
+**Interviewer:** Context... is this something that you actually do regularly after you search and analyze?
+
+**Respondent:** Unfortunately. *[Laughs]*
+
+**Interviewer:** Okay. You know, it's so funny when you're a startup founder and you talk to people and they say something like that—"unfortunately"—you would want to feel bad for them, but at the same time, you always get a little excited because there might be something that you can solve for them. And that's... that's good to hear, really. So, yeah, can you maybe elaborate a bit? What do you mean by "unfortunately"? What's the painstaking part?
+
+**Respondent:** It's just a lot of work that's not very exciting. You first have to search, then you have to go through the articles or the patent applications. It's just a lot of work and it's not very exciting. That's the problem. Also, the quality... it can get expensive very quickly. Because you have to review a lot of documents. So it's always this balance that you need to find. There's a certain amount of budget that people want to spend. There are people that spend 5k on a Freedom to Operate (FTO) analysis and there are people that spend 100,000 Euros on a Freedom to Operate analysis.
+
+Obviously, you have both a novelty search and an FTO analysis, but for one, it's so much more work that you do than the other. The other one [novelty search] is just really looking at some feature of whatever they're doing, and you specifically look for that field. But that doesn't necessarily mean that there's not an application that might be limiting their freedom to operate that has a slightly different classification, or a slightly different terminology, or something that you will not pick up. Also, the search is usually not *that* problematic; it's just really analyzing the documents themselves. That's really the annoying bit. Some people really like it; I am not really that big a fan.
+
+**Interviewer:** Yeah.
+
+**Respondent:** Yeah, because it's so tedious and you always end up with the feeling that you haven't found everything.
+
+**Interviewer:** Oh yeah, yeah, I know that feeling. I’ve heard that before. It never really feels exhaustive or complete. There is always a possibility of missing something.
+
+**Respondent:** Yeah. So it's also not very fulfilling when you're done. It's never really complete.
+"
+
+This would be an ideal output, in this exact format:
+
+"
+- Is FTO search and analysis something you do regularly?
+    - Yes, unfortunately
+- Why "unfortunately"? What's the painful part?
+    - Lot of work, not very exciting
+    - First have to search, then go through patent applications
+    - Gets expensive very quickly
+    - Need to review many documents
+    - Have to navigate budget constraints
+    - Lower budget = more limited search = higher risk of missing relevant patents with different classification/terminology
+    - Analysis is the most problematic part (not the search itself)
+    - That’s very tedious/annoying
+    - Never feels complete, always possibility of missing something
+"
+
+This is the transcript I want you to process:"""
 
 if 'formatting_provider' not in st.session_state:
-    st.session_state.formatting_provider = "Claude"
+    st.session_state.formatting_provider = "Google"
 if 'formatting_model' not in st.session_state:
-    st.session_state.formatting_model = "claude-sonnet-4-5-20250929"
+    st.session_state.formatting_model = "gemini-3-pro-preview"
 
 def get_summary_model(provider):
     """Helper to resolve the summary model based on provider and session state."""
@@ -339,12 +378,20 @@ with tab1:
         with col2:
             transcription_provider = st.selectbox(
                 "Transcription Provider",
-                ["OpenAI", "Google"],
+                ["Google", "OpenAI"],
                 index=0
             )
             
         with col3:
-            if transcription_provider == "OpenAI":
+            if transcription_provider == "Google":
+                transcription_model = st.selectbox(
+                    "Google Model",
+                    ["gemini-3-pro-preview", "gemini-2.5-flash"],
+                    index=0,
+                    help="Gemini 3 Pro is high quality, Gemini 2.5 Flash is fast and efficient."
+                )
+                t_api_key = google_api_key
+            else:
                 transcription_model = st.selectbox(
                     "OpenAI Model",
                     ["gpt-4o-transcribe", "whisper-1"],
@@ -352,14 +399,6 @@ with tab1:
                     help="gpt-4o-transcribe is generally more accurate than whisper-1."
                 )
                 t_api_key = openai_api_key
-            else:
-                transcription_model = st.selectbox(
-                    "Google Model",
-                    ["gemini-2.5-flash", "gemini-3-pro-preview"],
-                    index=0,
-                    help="Gemini 2.5 Flash is fast and efficient for audio."
-                )
-                t_api_key = google_api_key
 
         with col4:
             limit_minutes = st.number_input(
@@ -377,13 +416,21 @@ with tab1:
         with f_col1:
             st.session_state.formatting_provider = st.selectbox(
                 "Formatting Provider",
-                ["Claude", "OpenAI", "Google"],
+                ["Google", "Claude", "OpenAI"],
                 index=0,
                 key="fmt_provider_select_upload"
             )
         
         with f_col2:
-            if st.session_state.formatting_provider == "Claude":
+            if st.session_state.formatting_provider == "Google":
+                st.session_state.formatting_model = st.selectbox(
+                    "Formatting Model",
+                    ["gemini-3-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash"],
+                    index=0,
+                    key="fmt_model_select_upload"
+                )
+                f_api_key = google_api_key
+            elif st.session_state.formatting_provider == "Claude":
                 st.session_state.formatting_model = st.selectbox(
                     "Formatting Model",
                     ["claude-sonnet-4-5-20250929", "claude-opus-4-5-20251101", "claude-haiku-4-5-20251001"],
@@ -392,7 +439,7 @@ with tab1:
                     key="fmt_model_select_upload"
                 )
                 f_api_key = claude_api_key
-            elif st.session_state.formatting_provider == "OpenAI":
+            else: # OpenAI
                 st.session_state.formatting_model = st.selectbox(
                     "Formatting Model",
                     ["gpt-5.1", "gpt-4.1", "gpt-4o", "o3-mini", "o1"],
@@ -400,14 +447,6 @@ with tab1:
                     key="fmt_model_select_upload"
                 )
                 f_api_key = openai_api_key
-            else: # Google
-                st.session_state.formatting_model = st.selectbox(
-                    "Formatting Model",
-                    ["gemini-3-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash"],
-                    index=0,
-                    key="fmt_model_select_upload"
-                )
-                f_api_key = google_api_key
 
         st.subheader("Upload an audio file")
 
@@ -597,13 +636,21 @@ with tab1:
         with f_col1:
             st.session_state.formatting_provider = st.selectbox(
                 "Formatting Provider",
-                ["Claude", "OpenAI", "Google"],
+                ["Google", "Claude", "OpenAI"],
                 index=0,
                 key="fmt_provider_select_text"
             )
         
         with f_col2:
-            if st.session_state.formatting_provider == "Claude":
+            if st.session_state.formatting_provider == "Google":
+                st.session_state.formatting_model = st.selectbox(
+                    "Formatting Model",
+                    ["gemini-3-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash"],
+                    index=0,
+                    key="fmt_model_select_text"
+                )
+                f_api_key = google_api_key
+            elif st.session_state.formatting_provider == "Claude":
                 st.session_state.formatting_model = st.selectbox(
                     "Formatting Model",
                     ["claude-sonnet-4-5-20250929", "claude-opus-4-5-20251101", "claude-haiku-4-5-20251001"],
@@ -612,7 +659,7 @@ with tab1:
                     key="fmt_model_select_text"
                 )
                 f_api_key = claude_api_key
-            elif st.session_state.formatting_provider == "OpenAI":
+            else: # OpenAI
                 st.session_state.formatting_model = st.selectbox(
                     "Formatting Model",
                     ["gpt-5.1", "gpt-4.1", "gpt-4o", "o3-mini", "o1"],
@@ -620,14 +667,6 @@ with tab1:
                     key="fmt_model_select_text"
                 )
                 f_api_key = openai_api_key
-            else: # Google
-                st.session_state.formatting_model = st.selectbox(
-                    "Formatting Model",
-                    ["gemini-3-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash"],
-                    index=0,
-                    key="fmt_model_select_text"
-                )
-                f_api_key = google_api_key
 
         raw_transcription_input = st.text_area(
             "Enter your raw transcription text here:",
@@ -665,14 +704,36 @@ with tab2:
             # Use session state to persist selection
             model_provider = st.radio(
                 "AI Provider", 
-                ["Claude", "OpenAI", "Google"],
+                ["Google", "Claude", "OpenAI"],
                 key="summary_model_provider"
             )
         
         with col_mod:
             # Display appropriate model options based on provider
-            if model_provider == "Claude":
+            if model_provider == "Google":
                 # Latest Anthropic Models (Late 2025)
+                # Latest Google Models (Late 2025)
+                st.selectbox(
+                    "Select Google Model",
+                    ["gemini-3-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash"],
+                    index=0,
+                    key="summary_model_google"
+                )
+                api_key = google_api_key
+                provider = "google"
+                
+            elif model_provider == "OpenAI":
+                # Latest OpenAI Models (Late 2025)
+                st.selectbox(
+                    "Select OpenAI Model",
+                    ["gpt-5.1", "gpt-4.1", "gpt-4o", "o3-mini", "o1"],
+                    index=0,
+                    key="summary_model_openai"
+                )
+                api_key = openai_api_key
+                provider = "openai"
+                
+            else:  # Claude
                 st.selectbox(
                     "Select Claude Model",
                     [
@@ -686,29 +747,7 @@ with tab2:
                 )
                 api_key = claude_api_key
                 provider = "claude"
-                
-            elif model_provider == "OpenAI":
-                # Latest OpenAI Models (Late 2025)
-                st.selectbox(
-                    "Select OpenAI Model",
-                    ["gpt-5.1", "gpt-4.1", "gpt-4o", "o3-mini", "o1"],
-                    index=0,
-                    key="summary_model_openai"
-                )
-                api_key = openai_api_key
-                provider = "openai"
-                
-            else:  # Google
-                # Latest Google Models (Late 2025)
-                st.selectbox(
-                    "Select Google Model",
-                    ["gemini-3-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash"],
-                    index=0,
-                    key="summary_model_google"
-                )
-                api_key = google_api_key
-                provider = "google"
-        
+
         # Determine current model for the button action
         current_model = get_summary_model(model_provider)
 
