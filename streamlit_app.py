@@ -288,10 +288,11 @@ if 'summary_model_provider' not in st.session_state:
 if 'summary_prompt' not in st.session_state:
     st.session_state.summary_prompt = """I give you the transcription of an interview. It is a customer discovery call about a company, exploring what they do, their business needs, and their methods.
 
-I want to keep every relevant piece of information that has been said, but ignore everything unimportant.
 What I need is a summary of the interview for my notes. 
 Go question by question. Write the summary of the question and write the answers into bullet points. Shorten every answer, use keywords when possible.
 Use exact wording when it matters. Do not add extra wording, but only what has been said.
+I want to keep every relevant piece of information that has been said. Focus on not losing any meaningful information.
+
 
 For example from this transcription:
 
