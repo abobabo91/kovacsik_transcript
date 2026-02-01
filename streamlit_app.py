@@ -4,8 +4,189 @@ import anthropic
 import google.generativeai as genai
 import os
 import tempfile
+import subprocess
+import sys
+import re
+from googleapiclient.discovery import build
+
+# Attempt to force upgrade yt-dlp at runtime if it's too old
+try:
+    import yt_dlp
+    version = getattr(yt_dlp.version, '__version__', '0.0.0')
+    if version < '2025.01.31':
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "-U", "yt-dlp"])
+        import importlib
+        importlib.reload(yt_dlp)
+except Exception:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "yt-dlp"])
+    import yt_dlp
+
 from pydub import AudioSegment
 from pydub.utils import make_chunks
+
+def download_youtube_audio(url, log_container=None):
+    """Downloads YouTube audio and returns the path to the MP3 file."""
+    try:
+        if log_container:
+            log_container.info(f"Using yt-dlp version: {yt_dlp.version.__version__}")
+            
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+            'outtmpl': os.path.join(tempfile.gettempdir(), '%(title)s.%(ext)s'),
+            'quiet': False,  # Changed to False for debugging
+            'no_warnings': False,
+            'nocheckcertificate': True,
+            'referer': 'https://www.google.com/',
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['web', 'mweb', 'android', 'ios'],
+                }
+            },
+            'http_headers': {
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Sec-Fetch-Mode': 'navigate',
+            },
+            'noplaylist': True, # Ensure we only download one video
+        }
+        
+        import io
+        from contextlib import redirect_stdout, redirect_stderr
+        
+        f = io.StringIO()
+        with redirect_stdout(f), redirect_stderr(f):
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=True)
+                    filename = ydl.prepare_filename(info)
+                    mp3_filename = os.path.splitext(filename)[0] + ".mp3"
+                    
+                    if not os.path.exists(mp3_filename):
+                        title = info.get('title', '')
+                        if title:
+                            possible_path = os.path.join(tempfile.gettempdir(), f"{title}.mp3")
+                            if os.path.exists(possible_path):
+                                return possible_path
+                    return mp3_filename
+            except Exception as e:
+                if log_container:
+                    log_container.error(f"yt-dlp internal error: {e}")
+                    with st.expander("Show detailed logs"):
+                        st.code(f.getvalue())
+                raise e
+                
+    except Exception as e:
+        st.error(f"Error downloading YouTube video: {e}")
+        return None
+
+def get_playlist_videos(url):
+    """Fetches titles and URLs of all videos in a playlist."""
+    try:
+        # Normalize URL to ensure playlist extraction
+        playlist_id_match = re.search(r"list=([a-zA-Z0-9_-]+)", url)
+        if playlist_id_match:
+            url = f"https://www.youtube.com/playlist?list={playlist_id_match.group(1)}"
+
+        ydl_opts = {
+            'extract_flat': False, # More thorough
+            'quiet': False,
+            'no_warnings': False,
+            'nocheckcertificate': True,
+            'ignoreerrors': True, # Skip deleted/unavailable videos
+            'cachedir': False,
+            'referer': 'https://www.google.com/',
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['web', 'mweb', 'android', 'ios'],
+                }
+            },
+            'http_headers': {
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Sec-Fetch-Mode': 'navigate',
+            }
+        }
+        
+        import io
+        from contextlib import redirect_stdout, redirect_stderr
+        f = io.StringIO()
+        
+        with redirect_stdout(f), redirect_stderr(f):
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                if 'entries' in info:
+                    entries = [e for e in info['entries'] if e]
+                    videos = [{
+                        'title': entry.get('title', 'Unknown Title'),
+                        'url': f"https://www.youtube.com/watch?v={entry.get('id')}",
+                        'id': entry.get('id')
+                    } for entry in entries]
+                    return videos, f.getvalue()
+                return [], f.getvalue()
+    except Exception as e:
+        return [], f"Error: {str(e)}\n\nLogs:\n{f.getvalue()}"
+
+def get_playlist_videos_api(url, api_key):
+    """Fetches titles and URLs of all videos in a playlist using YouTube Data API."""
+    try:
+        playlist_id_match = re.search(r"list=([a-zA-Z0-9_-]+)", url)
+        if not playlist_id_match:
+            # Check if it's just a video URL and not a playlist
+            video_id_match = re.search(r"(?:v=|\/)([a-zA-Z0-9_-]{11})", url)
+            if video_id_match:
+                video_id = video_id_match.group(1)
+                youtube = build('youtube', 'v3', developerKey=api_key)
+                request = youtube.videos().list(
+                    part="snippet",
+                    id=video_id
+                )
+                response = request.execute()
+                if response.get('items'):
+                    item = response['items'][0]
+                    return [{
+                        'title': item['snippet']['title'],
+                        'url': f"https://www.youtube.com/watch?v={video_id}",
+                        'id': video_id
+                    }], "Single video fetched via API."
+            return [], "Could not find playlist ID or video ID in URL."
+
+        playlist_id = playlist_id_match.group(1)
+        youtube = build('youtube', 'v3', developerKey=api_key)
+        
+        videos = []
+        next_page_token = None
+        
+        while True:
+            request = youtube.playlistItems().list(
+                part="snippet",
+                playlistId=playlist_id,
+                maxResults=50,
+                pageToken=next_page_token
+            )
+            response = request.execute()
+            
+            for item in response.get('items', []):
+                video_id = item['snippet']['resourceId']['videoId']
+                videos.append({
+                    'title': item['snippet']['title'],
+                    'url': f"https://www.youtube.com/watch?v={video_id}",
+                    'id': video_id
+                })
+                
+            next_page_token = response.get('nextPageToken')
+            if not next_page_token:
+                break
+                
+        return videos, f"Successfully fetched {len(videos)} videos via API."
+    except Exception as e:
+        return [], f"API Error: {str(e)}"
 
 # Function to transcribe audio
 def transcribe_audio(audio_file, api_key, provider="openai", model="gpt-4o-transcribe", language="en", limit_minutes=0):
@@ -44,9 +225,6 @@ def transcribe_audio(audio_file, api_key, provider="openai", model="gpt-4o-trans
             # Determine if we need to split (if duration > 10 mins or size > limit)
             # 10 mins of high quality audio is safe for 25MB limit
             chunk_length_ms = 10 * 60 * 1000
-            
-            # If we already trimmed it and it's small enough, we might not need further processing
-            # But the original code had splitting logic for large files.
             
             try:
                 # We need pydub if it's still too large
@@ -264,6 +442,7 @@ st.title("Interview Transcription and Summarization")
 openai_api_key = st.secrets.get("openai", {}).get("OPENAI_API_KEY", None)
 claude_api_key = st.secrets.get("anthropic", {}).get("ANTHROPIC_API_KEY", None)
 google_api_key = st.secrets.get("google", {}).get("GEMINI_API_KEY", None)
+youtube_api_key = st.secrets.get("youtube", {}).get("YOUTUBE_API_KEY", None)
 
 # Display warning if keys are missing (optional, but helpful for debugging)
 if not openai_api_key:
@@ -272,6 +451,8 @@ if not claude_api_key:
     st.sidebar.warning("Claude API Key not found in secrets (`[anthropic] ANTHROPIC_API_KEY`).")
 if not google_api_key:
     st.sidebar.warning("Google Gemini API Key not found in secrets (`[google] GEMINI_API_KEY`).")
+if not youtube_api_key:
+    st.sidebar.warning("YouTube API Key not found in secrets (`[youtube] YOUTUBE_API_KEY`).")
 
 # Initialize session state variables
 if 'raw_transcription' not in st.session_state:
@@ -335,6 +516,16 @@ The following would be an ideal output, in this exact format (no bold font):
 
 This is the transcript I want you to process:"""
 
+# YouTube Pipeline Session State
+if 'yt_results' not in st.session_state:
+    st.session_state.yt_results = {} # video_id -> {title, raw, coherent, detailed, short}
+if 'playlist_videos' not in st.session_state:
+    st.session_state.playlist_videos = []
+if 'last_playlist_url' not in st.session_state:
+    st.session_state.last_playlist_url = ''
+if 'current_view_video_id' not in st.session_state:
+    st.session_state.current_view_video_id = None
+
 if 'formatting_provider' not in st.session_state:
     st.session_state.formatting_provider = "Google"
 if 'formatting_model' not in st.session_state:
@@ -351,7 +542,7 @@ def get_summary_model(provider):
     return None
 
 # Create tabs for a better UI experience
-tab1, tab2 = st.tabs(["Transcribe & Format", "Summarize"])
+tab1, tab2, tab3 = st.tabs(["Transcribe & Format", "Summarize", "YouTube Transcribe"])
 
 with tab1:
     st.header("Get Interview Transcription")
@@ -772,6 +963,261 @@ with tab2:
         if st.session_state.structured_summary:
             st.subheader("Interview Summary")
             st.text_area("Summary", st.session_state.structured_summary, height=400)
+
+with tab3:
+    st.header("YouTube Video Transcription")
+    
+    col_url, col_fetch_dlp, col_fetch_api = st.columns([3, 1, 1])
+    with col_url:
+        youtube_url = st.text_input("Enter YouTube Video or Playlist URL:", placeholder="https://www.youtube.com/watch?v=... or https://www.youtube.com/playlist?list=...", label_visibility="collapsed")
+    with col_fetch_dlp:
+        fetch_clicked = st.button("Fetch (yt-dlp)", use_container_width=True)
+    with col_fetch_api:
+        fetch_api_clicked = st.button("Fetch (API)", use_container_width=True)
+
+    st.subheader("Transcription Settings")
+    yt_col1, yt_col2, yt_col3 = st.columns(3)
+    
+    with yt_col1:
+        yt_language_options = {"English": "en", "Hungarian": "hu"}
+        yt_selected_language_label = st.selectbox(
+            "Language",
+            list(yt_language_options.keys()),
+            index=0,
+            key="yt_lang"
+        )
+        yt_selected_language = yt_language_options[yt_selected_language_label]
+
+    with yt_col2:
+        yt_transcription_provider = st.selectbox(
+            "Transcription Provider",
+            ["Google", "OpenAI"],
+            index=0,
+            key="yt_prov"
+        )
+        
+    with yt_col3:
+        if yt_transcription_provider == "Google":
+            yt_transcription_model = st.selectbox(
+                "Google Model",
+                ["gemini-3-pro-preview", "gemini-2.5-flash"],
+                index=0,
+                key="yt_mod_goog"
+            )
+            yt_t_api_key = google_api_key
+        else:
+            yt_transcription_model = st.selectbox(
+                "OpenAI Model",
+                ["gpt-4o-transcribe", "whisper-1"],
+                index=0,
+                key="yt_mod_oa"
+            )
+            yt_t_api_key = openai_api_key
+
+    yt_limit_minutes = st.number_input(
+        "Limit Minutes (0=Full)", 
+        min_value=0, 
+        value=0,
+        step=1,
+        key="yt_limit"
+    )
+
+    # Fetch Playlist/Video Info logic
+    if fetch_clicked:
+        if not youtube_url:
+            st.warning("Please enter a URL first.")
+        else:
+            with st.spinner("Fetching YouTube metadata via yt-dlp..."):
+                videos, logs = get_playlist_videos(youtube_url)
+                if videos:
+                    st.session_state.playlist_videos = videos
+                    st.session_state.last_playlist_url = youtube_url
+                    st.success(f"Found {len(videos)} videos.")
+                else:
+                    st.error("No videos found. Check URL or logs below.")
+                    with st.expander("Show Fetch Logs"):
+                        st.code(logs)
+                    # Fallback for single video if playlist fetch failed but it might be a single video
+                    st.session_state.playlist_videos = [{'title': 'Single Video (Manual)', 'url': youtube_url, 'id': 'single'}]
+
+    if fetch_api_clicked:
+        if not youtube_url:
+            st.warning("Please enter a URL first.")
+        elif not youtube_api_key:
+            st.error("YouTube API Key not found in secrets. Please add it to `.streamlit/secrets.toml` under `[youtube] YOUTUBE_API_KEY`.")
+        else:
+            with st.spinner("Fetching YouTube metadata via API..."):
+                videos, logs = get_playlist_videos_api(youtube_url, youtube_api_key)
+                if videos:
+                    st.session_state.playlist_videos = videos
+                    st.session_state.last_playlist_url = youtube_url
+                    st.success(f"Found {len(videos)} videos.")
+                else:
+                    st.error(f"Failed to fetch videos via API: {logs}")
+
+    selected_videos = []
+    if st.session_state.playlist_videos:
+        st.subheader("Select videos to process:")
+        
+        # Select all / Deselect all logic
+        col_all1, col_all2 = st.columns(2)
+        with col_all1:
+            if st.button("Select All"):
+                for v in st.session_state.playlist_videos:
+                    st.session_state[f"check_{v['id']}"] = True
+        with col_all2:
+            if st.button("Deselect All"):
+                for v in st.session_state.playlist_videos:
+                    st.session_state[f"check_{v['id']}"] = False
+
+        # Checkbox list
+        for video in st.session_state.playlist_videos:
+            is_checked = st.checkbox(video['title'], key=f"check_{video['id']}")
+            if is_checked:
+                selected_videos.append(video)
+
+    btn_col1, btn_col2 = st.columns(2)
+    
+    with btn_col1:
+        if st.button("Download MP3", use_container_width=True):
+            if not selected_videos:
+                st.warning("No videos selected. Fetch info and select videos first.")
+            else:
+                for video in selected_videos:
+                    status = st.empty()
+                    with st.spinner(f"Downloading {video['title']}..."):
+                        mp3_path = download_youtube_audio(video['url'], log_container=status)
+                        if mp3_path and os.path.exists(mp3_path):
+                            with open(mp3_path, "rb") as f:
+                                st.download_button(
+                                    label=f"Click here to save {video['title']}",
+                                    data=f,
+                                    file_name=os.path.basename(mp3_path),
+                                    mime="audio/mpeg",
+                                    key=f"dl_{video['id']}_{os.urandom(4).hex()}"
+                                )
+                        else:
+                            st.error(f"Failed to download {video['title']}.")
+
+    with btn_col2:
+        if st.button("Transcribe Selected Videos", use_container_width=True):
+            if not selected_videos:
+                st.warning("No videos selected. Fetch info and select videos first.")
+            elif not yt_t_api_key:
+                st.error(f"Missing API key for {yt_transcription_provider}.")
+            else:
+                for i, video in enumerate(selected_videos):
+                    yt_status = st.empty()
+                    try:
+                        prefix = f"[{i+1}/{len(selected_videos)}] {video['title']}: "
+                        yt_status.info(prefix + "Step 1/5: Downloading audio...")
+                        mp3_path = download_youtube_audio(video['url'], log_container=yt_status)
+                        
+                        if mp3_path and os.path.exists(mp3_path):
+                            with open(mp3_path, "rb") as audio_file:
+                                # 2. Transcribe
+                                yt_status.info(prefix + f"Step 2/5: Transcribing with {yt_transcription_provider}...")
+                                raw_trans = transcribe_audio(
+                                    audio_file, 
+                                    yt_t_api_key, 
+                                    yt_transcription_provider, 
+                                    yt_transcription_model, 
+                                    yt_selected_language, 
+                                    yt_limit_minutes
+                                )
+                                
+                                if raw_trans:
+                                    # 3. Coherence
+                                    yt_status.info(prefix + "Step 3/5: Making text coherent...")
+                                    f_prov = st.session_state.formatting_provider
+                                    f_mod = st.session_state.formatting_model
+                                    f_key = google_api_key if f_prov == "Google" else (claude_api_key if f_prov == "Claude" else openai_api_key)
+
+                                    if f_key:
+                                        coherence_instr = "I give you a transcript. Your job is to organize it into logical paragraphs based on the topics discussed. Correct any obvious transcription errors in names or technical terms, but keep the original wording exactly as is. Do not add any extra commentary."
+                                        coherent_text = summarize_transcription(raw_trans, f_key, coherence_instr, provider=f_prov.lower(), model=f_mod)
+                                        
+                                        # 4. Detailed Summary
+                                        yt_status.info(prefix + "Step 4/5: Generating detailed summary...")
+                                        detailed_prompt = "Provide a detailed summary of this transcript. Keep every meaningful aspect that has been mentioned. Use bullet points."
+                                        detailed_summary = summarize_transcription(coherent_text, f_key, detailed_prompt, provider=f_prov.lower(), model=f_mod)
+                                        
+                                        # 5. Short Summary
+                                        yt_status.info(prefix + "Step 5/5: Generating short summary...")
+                                        short_prompt = "Provide a summary of at most 3 paragraphs. Focus on the most important information and key takeaways."
+                                        short_summary = summarize_transcription(coherent_text, f_key, short_prompt, provider=f_prov.lower(), model=f_mod)
+                                        
+                                        # Store in results dictionary
+                                        video_id = video['id']
+                                        st.session_state.yt_results[video_id] = {
+                                            'title': video['title'],
+                                            'raw': raw_trans,
+                                            'coherent': coherent_text,
+                                            'detailed': detailed_summary,
+                                            'short': short_summary
+                                        }
+                                        st.session_state.current_view_video_id = video_id
+                                        yt_status.success(prefix + "Done!")
+                                    else:
+                                        yt_status.error(prefix + "Missing formatting API key.")
+                                else:
+                                    yt_status.error(prefix + "Transcription failed.")
+                            
+                            if os.path.exists(mp3_path):
+                                os.remove(mp3_path)
+                        else:
+                            yt_status.error(prefix + "Failed to download audio.")
+                    except Exception as e:
+                        st.error(f"Error processing {video['title']}: {e}")
+
+    # Navigation Switcher for Multiple Results
+    if st.session_state.yt_results:
+        st.divider()
+        st.subheader("View Results")
+
+        # Bulk Download Summaries Logic
+        combined_summaries = ""
+        for res_id, res_data in st.session_state.yt_results.items():
+            combined_summaries += "=" * 50 + "\n"
+            combined_summaries += f"VIDEO: {res_data['title']}\n"
+            combined_summaries += "=" * 50 + "\n\n"
+            combined_summaries += "--- SHORT SUMMARY ---\n"
+            combined_summaries += f"{res_data['short']}\n\n"
+            combined_summaries += "--- DETAILED SUMMARY ---\n"
+            combined_summaries += f"{res_data['detailed']}\n\n"
+            combined_summaries += "\n"
+
+        st.download_button(
+            label="Download All Summaries",
+            data=combined_summaries,
+            file_name="all_youtube_summaries.txt",
+            mime="text/plain",
+            use_container_width=True
+        )
+        
+        result_options = {res['title']: vid_id for vid_id, res in st.session_state.yt_results.items()}
+        selected_view_title = st.selectbox(
+            "Select processed video to view:", 
+            list(result_options.keys()), 
+            index=list(result_options.values()).index(st.session_state.current_view_video_id) if st.session_state.current_view_video_id in result_options.values() else 0
+        )
+        st.session_state.current_view_video_id = result_options[selected_view_title]
+        
+        res = st.session_state.yt_results[st.session_state.current_view_video_id]
+        
+        st.subheader(f"Results for: {res['title']}")
+        
+        st.markdown("### Short Summary (Key Takeaways)")
+        st.write(res['short'])
+        
+        st.markdown("### Detailed Summary")
+        st.write(res['detailed'])
+        
+        with st.expander("Show Coherent Transcript"):
+            st.write(res['coherent'])
+            
+        with st.expander("Show Raw Transcription"):
+            st.code(res['raw'], language=None)
 
 # Add download buttons for the outputs
 st.sidebar.markdown("---")

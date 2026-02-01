@@ -1,6 +1,8 @@
 openai
 anthropic
 google-generativeai
+google-api-python-client
 streamlit
 pydub
+yt-dlp==2025.1.31
 tiktoken
