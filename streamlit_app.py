@@ -1009,9 +1009,23 @@ with tab3:
         youtube_url = st.text_input("Enter YouTube Video or Playlist URL:", placeholder="https://www.youtube.com/watch?v=... or https://www.youtube.com/playlist?list=...", label_visibility="collapsed")
     
     with st.expander("Advanced YouTube Settings (Cookies / PO Token)"):
-        st.info("If you get 403 Forbidden errors, try providing cookies or a PO Token.")
-        st.session_state.yt_cookies = st.text_area("YouTube Cookies (Netscape format text):", help="Export cookies from your browser using a 'Cookies.txt' extension and paste the content here.")
-        st.session_state.yt_po_token = st.text_input("Manual PO Token:", help="If you have a generated PO Token, paste it here. It will override the one in secrets.")
+        st.info("""
+        If you encounter **HTTP Error 403: Forbidden**, YouTube may be blocking the server's IP. 
+        Providing cookies or a PO Token can help bypass this.
+        
+        **How to obtain Cookies:**
+        1. Install a browser extension like 'Get cookies.txt LOCALLY' or 'EditThisCookie'.
+        2. Log into YouTube in your browser.
+        3. Use the extension to export cookies for `youtube.com` in **Netscape** format.
+        4. Paste the entire text content below.
+        
+        **How to obtain a PO Token:**
+        1. Use a tool like [yt-dlp-get-pot](https://github.com/coletdjnz/yt-dlp-get-pot-provider) or follow the [PO Token Guide](https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide).
+        2. Alternatively, some browser extensions for `yt-dlp` can generate these.
+        3. Paste the token below.
+        """)
+        st.session_state.yt_cookies = st.text_area("YouTube Cookies (Netscape format text):", help="Paste the content of your exported cookies.txt file here.")
+        st.session_state.yt_po_token = st.text_input("Manual PO Token:", help="Enter a Proof of Origin token to bypass bot detection.")
 
     with col_fetch_dlp:
         fetch_clicked = st.button("Fetch (yt-dlp)", use_container_width=True)
@@ -1075,6 +1089,8 @@ with tab3:
                 if videos:
                     st.session_state.playlist_videos = videos
                     st.session_state.last_playlist_url = youtube_url
+                    if len(videos) == 1:
+                        st.session_state[f"check_{videos[0]['id']}"] = True
                     st.success(f"Found {len(videos)} videos.")
                 else:
                     st.error("No videos found. Check URL or logs below.")
@@ -1094,6 +1110,8 @@ with tab3:
                 if videos:
                     st.session_state.playlist_videos = videos
                     st.session_state.last_playlist_url = youtube_url
+                    if len(videos) == 1:
+                        st.session_state[f"check_{videos[0]['id']}"] = True
                     st.success(f"Found {len(videos)} videos.")
                 else:
                     st.error(f"Failed to fetch videos via API: {logs}")
