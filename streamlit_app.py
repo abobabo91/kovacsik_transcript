@@ -1008,6 +1008,14 @@ with tab3:
     with col_url:
         youtube_url = st.text_input("Enter YouTube Video or Playlist URL:", placeholder="https://www.youtube.com/watch?v=... or https://www.youtube.com/playlist?list=...", label_visibility="collapsed")
     
+    # URL Type Detection
+    is_playlist = "list=" in youtube_url if youtube_url else False
+    if youtube_url:
+        if is_playlist:
+            st.info("This looks like a playlist. Please use 'Fetch' to list videos and select which ones to process.")
+        else:
+            st.success("Single video detected. You can download or transcribe it immediately.")
+
     with st.expander("Advanced YouTube Settings (Cookies / PO Token)"):
         st.info("""
         If you encounter **HTTP Error 403: Forbidden**, YouTube may be blocking the server's IP. 
@@ -1117,7 +1125,21 @@ with tab3:
                     st.error(f"Failed to fetch videos via API: {logs}")
 
     selected_videos = []
-    if st.session_state.playlist_videos:
+    
+    # Populate selected_videos based on URL type or fetched list
+    if youtube_url and not is_playlist:
+        # For single videos, bypass selection
+        video_id = "single"
+        video_id_match = re.search(r"(?:v=|\/)([a-zA-Z0-9_-]{11})", youtube_url)
+        if video_id_match:
+            video_id = video_id_match.group(1)
+            
+        selected_videos = [{
+            'title': 'Single Video',
+            'url': youtube_url,
+            'id': video_id
+        }]
+    elif st.session_state.playlist_videos:
         st.subheader("Select videos to process:")
         
         # Select all / Deselect all logic
