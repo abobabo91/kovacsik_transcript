@@ -30,7 +30,18 @@ def download_youtube_audio(url, log_container=None):
         if log_container:
             log_container.info(f"Using yt-dlp version: {yt_dlp.version.__version__}")
             
+        # Get PO Token from session state or secrets
+        po_token = st.session_state.get('yt_po_token') or st.secrets.get("youtube", {}).get("PO_TOKEN", None)
+        cookies_content = st.session_state.get('yt_cookies')
+        
+        cookie_file_path = None
+        if cookies_content:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".txt", mode='w', encoding='utf-8') as tf:
+                tf.write(cookies_content)
+                cookie_file_path = tf.name
+
         ydl_opts = {
+            'cookiefile': cookie_file_path,
             'format': 'bestaudio/best',
             'postprocessors': [{
                 'key': 'FFmpegExtractAudio',
@@ -42,10 +53,11 @@ def download_youtube_audio(url, log_container=None):
             'no_warnings': False,
             'nocheckcertificate': True,
             'referer': 'https://www.google.com/',
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
             'extractor_args': {
                 'youtube': {
                     'player_client': ['web', 'mweb', 'android', 'ios'],
+                    'po_token': [f"web+{po_token}", f"mweb+{po_token}", f"android+{po_token}", f"ios+{po_token}"] if po_token else []
                 }
             },
             'http_headers': {
@@ -80,6 +92,12 @@ def download_youtube_audio(url, log_container=None):
                     with st.expander("Show detailed logs"):
                         st.code(f.getvalue())
                 raise e
+            finally:
+                if cookie_file_path and os.path.exists(cookie_file_path):
+                    try:
+                        os.remove(cookie_file_path)
+                    except:
+                        pass
                 
     except Exception as e:
         st.error(f"Error downloading YouTube video: {e}")
@@ -93,7 +111,18 @@ def get_playlist_videos(url):
         if playlist_id_match:
             url = f"https://www.youtube.com/playlist?list={playlist_id_match.group(1)}"
 
+        # Get PO Token from session state or secrets
+        po_token = st.session_state.get('yt_po_token') or st.secrets.get("youtube", {}).get("PO_TOKEN", None)
+        cookies_content = st.session_state.get('yt_cookies')
+        
+        cookie_file_path = None
+        if cookies_content:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".txt", mode='w', encoding='utf-8') as tf:
+                tf.write(cookies_content)
+                cookie_file_path = tf.name
+
         ydl_opts = {
+            'cookiefile': cookie_file_path,
             'extract_flat': False, # More thorough
             'quiet': False,
             'no_warnings': False,
@@ -101,10 +130,11 @@ def get_playlist_videos(url):
             'ignoreerrors': True, # Skip deleted/unavailable videos
             'cachedir': False,
             'referer': 'https://www.google.com/',
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
             'extractor_args': {
                 'youtube': {
                     'player_client': ['web', 'mweb', 'android', 'ios'],
+                    'po_token': [f"web+{po_token}", f"mweb+{po_token}", f"android+{po_token}", f"ios+{po_token}"] if po_token else []
                 }
             },
             'http_headers': {
@@ -119,17 +149,24 @@ def get_playlist_videos(url):
         f = io.StringIO()
         
         with redirect_stdout(f), redirect_stderr(f):
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                if 'entries' in info:
-                    entries = [e for e in info['entries'] if e]
-                    videos = [{
-                        'title': entry.get('title', 'Unknown Title'),
-                        'url': f"https://www.youtube.com/watch?v={entry.get('id')}",
-                        'id': entry.get('id')
-                    } for entry in entries]
-                    return videos, f.getvalue()
-                return [], f.getvalue()
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(url, download=False)
+                    if 'entries' in info:
+                        entries = [e for e in info['entries'] if e]
+                        videos = [{
+                            'title': entry.get('title', 'Unknown Title'),
+                            'url': f"https://www.youtube.com/watch?v={entry.get('id')}",
+                            'id': entry.get('id')
+                        } for entry in entries]
+                        return videos, f.getvalue()
+                    return [], f.getvalue()
+            finally:
+                if cookie_file_path and os.path.exists(cookie_file_path):
+                    try:
+                        os.remove(cookie_file_path)
+                    except:
+                        pass
     except Exception as e:
         return [], f"Error: {str(e)}\n\nLogs:\n{f.getvalue()}"
 
@@ -970,6 +1007,12 @@ with tab3:
     col_url, col_fetch_dlp, col_fetch_api = st.columns([3, 1, 1])
     with col_url:
         youtube_url = st.text_input("Enter YouTube Video or Playlist URL:", placeholder="https://www.youtube.com/watch?v=... or https://www.youtube.com/playlist?list=...", label_visibility="collapsed")
+    
+    with st.expander("Advanced YouTube Settings (Cookies / PO Token)"):
+        st.info("If you get 403 Forbidden errors, try providing cookies or a PO Token.")
+        st.session_state.yt_cookies = st.text_area("YouTube Cookies (Netscape format text):", help="Export cookies from your browser using a 'Cookies.txt' extension and paste the content here.")
+        st.session_state.yt_po_token = st.text_input("Manual PO Token:", help="If you have a generated PO Token, paste it here. It will override the one in secrets.")
+
     with col_fetch_dlp:
         fetch_clicked = st.button("Fetch (yt-dlp)", use_container_width=True)
     with col_fetch_api:
@@ -1163,8 +1206,9 @@ with tab3:
                                 else:
                                     yt_status.error(prefix + "Transcription failed.")
                             
-                            if os.path.exists(mp3_path):
-                                os.remove(mp3_path)
+                                if os.path.exists(mp3_path):
+                                    os.remove(mp3_path)
+                            
                         else:
                             yt_status.error(prefix + "Failed to download audio.")
                     except Exception as e:
