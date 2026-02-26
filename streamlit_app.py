@@ -8,6 +8,7 @@ import subprocess
 import sys
 import re
 from googleapiclient.discovery import build
+import moviepy.editor as mp
 
 # Attempt to force upgrade yt-dlp at runtime if it's too old
 try:
@@ -23,6 +24,28 @@ except Exception:
 
 from pydub import AudioSegment
 from pydub.utils import make_chunks
+
+def extract_audio_from_video(video_file):
+    """Extracts audio from a video file and returns the path to the MP3 file."""
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_video:
+            tmp_video.write(video_file.read())
+            tmp_video_path = tmp_video.name
+        
+        audio_output_path = os.path.join(tempfile.gettempdir(), f"extracted_{os.urandom(4).hex()}.mp3")
+        
+        video = mp.VideoFileClip(tmp_video_path)
+        video.audio.write_audiofile(audio_output_path, codec='libmp3lame')
+        video.close()
+        
+        # Cleanup video file
+        if os.path.exists(tmp_video_path):
+            os.remove(tmp_video_path)
+            
+        return audio_output_path
+    except Exception as e:
+        st.error(f"Error extracting audio from video: {e}")
+        return None
 
 def download_youtube_audio(url, log_container=None):
     """Downloads YouTube audio and returns the path to the MP3 file."""
@@ -503,8 +526,7 @@ if 'last_processed_file' not in st.session_state:
 if 'summary_model_provider' not in st.session_state:
     st.session_state.summary_model_provider = "Google"
 # summary_selected_model removed in favor of dynamic resolution
-if 'summary_prompt' not in st.session_state:
-    st.session_state.summary_prompt = """I give you the transcription of an interview. It is a customer discovery call about a company, exploring what they do, their business needs, and their methods.
+INTERVIEW_PROMPT = """I give you the transcription of an interview. It is a customer discovery call about a company, exploring what they do, their business needs, and their methods.
 
 What I need is a summary of the interview for my notes. 
 Go question by question. Write the summary of the question and write the answers into bullet points. Shorten every answer, use keywords when possible.
@@ -553,6 +575,24 @@ The following would be an ideal output, in this exact format (no bold font):
 
 This is the transcript I want you to process:"""
 
+MEETING_PROMPT = """I give you the transcription of a meeting. 
+
+What I need is a professional summary of the meeting for my notes. 
+Break it down into the following sections:
+1. **Meeting Overview**: A brief 2-3 sentence summary of what the meeting was about.
+2. **Key Discussion Points**: Use bullet points to list the main topics discussed and the key information shared for each.
+3. **Decisions Made**: List any clear decisions that were reached during the meeting.
+4. **Action Items**: List any tasks or next steps assigned to specific participants, with deadlines if mentioned.
+
+Keep the summary concise but ensure no critical information is lost. Use exact wording for technical terms or specific figures.
+
+This is the transcript I want you to process:"""
+
+if 'summary_prompt' not in st.session_state:
+    st.session_state.summary_prompt = INTERVIEW_PROMPT
+if 'summary_type' not in st.session_state:
+    st.session_state.summary_type = "Interview"
+
 # YouTube Pipeline Session State
 if 'yt_results' not in st.session_state:
     st.session_state.yt_results = {} # video_id -> {title, raw, coherent, detailed, short}
@@ -579,7 +619,7 @@ def get_summary_model(provider):
     return None
 
 # Create tabs for a better UI experience
-tab1, tab2, tab3 = st.tabs(["Transcribe & Format", "Summarize", "YouTube Transcribe"])
+tab1, tab2, tab3, tab4 = st.tabs(["Transcribe & Format", "Video Transcribe", "Summarize", "YouTube Transcribe"])
 
 with tab1:
     st.header("Get Interview Transcription")
@@ -909,13 +949,172 @@ with tab1:
 
 
 with tab2:
-    st.header("Summarize Interview")
+    st.header("Transcribe & Format Video")
+    
+    st.subheader("Video Model Settings")
+    v_col1, v_col2, v_col3, v_col4 = st.columns(4)
+    
+    with v_col1:
+        v_language_options = {"English": "en", "Hungarian": "hu"}
+        v_selected_language_label = st.selectbox(
+            "Language",
+            list(v_language_options.keys()),
+            index=0,
+            key="v_lang"
+        )
+        v_selected_language = v_language_options[v_selected_language_label]
+
+    with v_col2:
+        v_transcription_provider = st.selectbox(
+            "Transcription Provider",
+            ["Google", "OpenAI"],
+            index=0,
+            key="v_prov"
+        )
+        
+    with v_col3:
+        if v_transcription_provider == "Google":
+            v_transcription_model = st.selectbox(
+                "Google Model",
+                ["gemini-3-pro-preview", "gemini-2.5-flash"],
+                index=0,
+                key="v_mod_goog"
+            )
+            v_t_api_key = google_api_key
+        else:
+            v_transcription_model = st.selectbox(
+                "OpenAI Model",
+                ["gpt-4o-transcribe", "whisper-1"],
+                index=0,
+                key="v_mod_oa"
+            )
+            v_t_api_key = openai_api_key
+
+    with v_col4:
+        v_limit_minutes = st.number_input(
+            "Limit Minutes (0=Full)", 
+            min_value=0, 
+            value=0,
+            step=1,
+            key="v_limit"
+        )
+
+    # Formatting Options
+    st.subheader("Language Model Settings")
+    vf_col1, vf_col2 = st.columns(2)
+    with vf_col1:
+        st.session_state.formatting_provider = st.selectbox(
+            "Formatting Provider",
+            ["Google", "Claude", "OpenAI"],
+            index=0,
+            key="fmt_provider_select_video"
+        )
+    
+    with vf_col2:
+        if st.session_state.formatting_provider == "Google":
+            st.session_state.formatting_model = st.selectbox(
+                "Formatting Model",
+                ["gemini-3-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash"],
+                index=0,
+                key="fmt_model_select_video"
+            )
+            vf_api_key = google_api_key
+        elif st.session_state.formatting_provider == "Claude":
+            st.session_state.formatting_model = st.selectbox(
+                "Formatting Model",
+                ["claude-sonnet-4-5-20250929", "claude-opus-4-5-20251101", "claude-haiku-4-5-20251001"],
+                index=0,
+                format_func=lambda x: x.split("-2025")[0].replace("-", " ").title(),
+                key="fmt_model_select_video"
+            )
+            vf_api_key = claude_api_key
+        else: # OpenAI
+            st.session_state.formatting_model = st.selectbox(
+                "Formatting Model",
+                ["gpt-5.1", "gpt-4.1", "gpt-4o", "o3-mini", "o1"],
+                index=0,
+                key="fmt_model_select_video"
+            )
+            vf_api_key = openai_api_key
+
+    st.subheader("Upload a video file")
+
+    uploaded_video = st.file_uploader("Upload a video file", type=["mp4", "mov", "avi", "mkv"], label_visibility="collapsed")
+    
+    v_start_processing = st.button("Start Video Transcription")
+
+    # Reuse containers or create new ones
+    v_raw_container = st.empty()
+    v_formatted_container = st.empty()
+    v_summary_container = st.empty()
+
+    if v_start_processing:
+        if not uploaded_video:
+            st.warning("There is no file uploaded.")
+        else:
+            if not v_t_api_key:
+                st.error(f"Missing {v_transcription_provider} API Key.")
+            else:
+                v_status = st.empty()
+                try:
+                    # 0. Extract Audio
+                    v_status.info("Step 0/4: Extracting audio from video...")
+                    extracted_audio_path = extract_audio_from_video(uploaded_video)
+                    
+                    if extracted_audio_path and os.path.exists(extracted_audio_path):
+                        with open(extracted_audio_path, "rb") as audio_file:
+                            # 1. Transcribe
+                            v_status.info(f"Step 1/4: Transcribing with {v_transcription_provider}...")
+                            raw_trans = transcribe_audio(audio_file, v_t_api_key, v_transcription_provider, v_transcription_model, v_selected_language, v_limit_minutes)
+                            
+                            if raw_trans:
+                                st.session_state.raw_transcription = raw_trans
+                                
+                                # 2. Format
+                                v_status.info(f"Step 2/4: Formatting with {st.session_state.formatting_provider}...")
+                                if not vf_api_key:
+                                    st.warning(f"Missing {st.session_state.formatting_provider} API Key. Skipping formatting.")
+                                else:
+                                    formatted_trans = format_transcription(raw_trans, vf_api_key, st.session_state.formatting_provider, st.session_state.formatting_model)
+                                    if formatted_trans:
+                                        st.session_state.structured_transcription = formatted_trans
+                                        
+                                        # 3. Summarize
+                                        v_status.info("Step 3/4: Generating summary...")
+                                        summ_provider = st.session_state.summary_model_provider
+                                        summ_model = get_summary_model(summ_provider)
+                                        summ_api_key = google_api_key if summ_provider == "Google" else (claude_api_key if summ_provider == "Claude" else openai_api_key)
+                                        
+                                        if summ_api_key:
+                                            summary = summarize_transcription(formatted_trans, summ_api_key, st.session_state.summary_prompt, provider=summ_provider, model=summ_model)
+                                            if summary:
+                                                st.session_state.structured_summary = summary
+                                                v_status.success("Processing Complete!")
+                                                st.rerun()
+                        
+                        # Cleanup
+                        if os.path.exists(extracted_audio_path):
+                            os.remove(extracted_audio_path)
+                except Exception as e:
+                    v_status.error(f"An error occurred: {e}")
+
+with tab3:
+    st.header("Summarize Transcription")
     
     if not st.session_state.structured_transcription:
         st.info("Please complete the transcription and formatting steps first.")
     else:
         st.subheader("Customize Summary Prompt")
         
+        # New prompt selection
+        col_type, col_space = st.columns([1, 2])
+        with col_type:
+            summary_type = st.selectbox("Summary Type", ["Interview", "Meeting"], index=0 if st.session_state.summary_type == "Interview" else 1)
+            if summary_type != st.session_state.summary_type:
+                st.session_state.summary_type = summary_type
+                st.session_state.summary_prompt = INTERVIEW_PROMPT if summary_type == "Interview" else MEETING_PROMPT
+                st.rerun()
+
         # Let user edit the summary prompt
         st.session_state.summary_prompt = st.text_area(
             "Edit the summary prompt below. Hit Ctrl + Enter to save.",
