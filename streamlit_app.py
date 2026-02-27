@@ -479,7 +479,7 @@ def summarize_transcription(structured_transcription, api_key, summary_prompt, p
             
         elif provider.lower() == "google":
             genai.configure(api_key=api_key)
-            google_model_name = model or "gemini-3-pro-preview"
+            google_model_name = model or "gemini-3.1-pro-preview"
             
             model_instance = genai.GenerativeModel(google_model_name)
             response = model_instance.generate_content(prompt)
@@ -606,7 +606,7 @@ if 'current_view_video_id' not in st.session_state:
 if 'formatting_provider' not in st.session_state:
     st.session_state.formatting_provider = "Google"
 if 'formatting_model' not in st.session_state:
-    st.session_state.formatting_model = "gemini-3-pro-preview"
+    st.session_state.formatting_model = "gemini-3.1-pro-preview"
 
 def get_summary_model(provider):
     """Helper to resolve the summary model based on provider and session state."""
@@ -615,7 +615,7 @@ def get_summary_model(provider):
     elif provider == "OpenAI":
         return st.session_state.get("summary_model_openai", "gpt-5.1")
     elif provider == "Google":
-        return st.session_state.get("summary_model_google", "gemini-3-pro-preview")
+        return st.session_state.get("summary_model_google", "gemini-3.1-pro-preview")
     return None
 
 # Create tabs for a better UI experience
@@ -654,7 +654,7 @@ with tab1:
             if transcription_provider == "Google":
                 transcription_model = st.selectbox(
                     "Google Model",
-                    ["gemini-3-pro-preview", "gemini-2.5-flash"],
+                    ["gemini-3.1-pro-preview", "gemini-2.5-flash"],
                     index=0,
                     help="Gemini 3 Pro is high quality, Gemini 2.5 Flash is fast and efficient."
                 )
@@ -693,7 +693,7 @@ with tab1:
             if st.session_state.formatting_provider == "Google":
                 st.session_state.formatting_model = st.selectbox(
                     "Formatting Model",
-                    ["gemini-3-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash"],
+                    ["gemini-3.1-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash"],
                     index=0,
                     key="fmt_model_select_upload"
                 )
@@ -913,7 +913,7 @@ with tab1:
             if st.session_state.formatting_provider == "Google":
                 st.session_state.formatting_model = st.selectbox(
                     "Formatting Model",
-                    ["gemini-3-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash"],
+                    ["gemini-3.1-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash"],
                     index=0,
                     key="fmt_model_select_text"
                 )
@@ -976,7 +976,7 @@ with tab2:
         if v_transcription_provider == "Google":
             v_transcription_model = st.selectbox(
                 "Google Model",
-                ["gemini-3-pro-preview", "gemini-2.5-flash"],
+                ["gemini-3.1-pro-preview", "gemini-2.5-flash"],
                 index=0,
                 key="v_mod_goog"
             )
@@ -1014,7 +1014,7 @@ with tab2:
         if st.session_state.formatting_provider == "Google":
             st.session_state.formatting_model = st.selectbox(
                 "Formatting Model",
-                ["gemini-3-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash"],
+                ["gemini-3.1-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash"],
                 index=0,
                 key="fmt_model_select_video"
             )
@@ -1142,7 +1142,7 @@ with tab3:
                 # Latest Google Models (Late 2025)
                 st.selectbox(
                     "Select Google Model",
-                    ["gemini-3-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash"],
+                    ["gemini-3.1-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash"],
                     index=0,
                     key="summary_model_google"
                 )
@@ -1264,7 +1264,7 @@ with tab3:
         if yt_transcription_provider == "Google":
             yt_transcription_model = st.selectbox(
                 "Google Model",
-                ["gemini-3-pro-preview", "gemini-2.5-flash"],
+                ["gemini-3.1-pro-preview", "gemini-2.5-flash"],
                 index=0,
                 key="yt_mod_goog"
             )
