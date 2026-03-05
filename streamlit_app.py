@@ -8,7 +8,20 @@ import subprocess
 import sys
 import re
 from googleapiclient.discovery import build
-import moviepy.editor as mp
+try:
+    import moviepy.editor as mp
+except ImportError:
+    # Handle moviepy v2.0.0+ where editor submodule is moved/removed
+    try:
+        from moviepy import VideoFileClip
+        # Create a mock object to keep mp.VideoFileClip working
+        class MockMP:
+            def __init__(self, video_clip_class):
+                self.VideoFileClip = video_clip_class
+        mp = MockMP(VideoFileClip)
+    except ImportError:
+        st.error("MoviePy is not installed. Please check requirements.txt")
+        mp = None
 
 # Attempt to force upgrade yt-dlp at runtime if it's too old
 try:
@@ -27,6 +40,10 @@ from pydub.utils import make_chunks
 
 def extract_audio_from_video(video_file):
     """Extracts audio from a video file and returns the path to the MP3 file."""
+    if mp is None:
+        st.error("MoviePy is not available.")
+        return None
+        
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".mp4") as tmp_video:
             tmp_video.write(video_file.read())
