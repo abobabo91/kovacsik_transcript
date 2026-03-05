@@ -1,4 +1,7 @@
 import streamlit as st
+# Set max upload size to 1GB directly in the code
+st.set_option("server.maxUploadSize", 1024)
+
 import openai
 import anthropic
 import google.generativeai as genai
@@ -1552,7 +1555,7 @@ with tab5:
     st.header("MTMT - Meeting Transcribe (HU)")
     st.info("Automated Hungarian meeting transcription and summarization using Gemini 3 Flash Preview.")
 
-    uploaded_mtmt_video = st.file_uploader("Upload a meeting video file", type=["mp4", "mov", "avi", "mkv"], key="mtmt_uploader")
+    uploaded_mtmt_video = st.file_uploader("Upload a meeting video file (Max 1GB)", type=["mp4", "mov", "avi", "mkv"], key="mtmt_uploader", label_visibility="visible")
     
     if st.button("Start MTMT Processing"):
         if not uploaded_mtmt_video:
