@@ -9,6 +9,9 @@ import subprocess
 import sys
 import re
 from googleapiclient.discovery import build
+import io
+from docx import Document
+from docx.shared import Pt
 try:
     import moviepy.editor as mp
 except ImportError:
@@ -452,6 +455,52 @@ def format_transcription(transcription, api_key, provider, model):
         st.error(f"Error formatting transcription with {provider}: {e}")
         return ""
     
+def convert_md_to_docx(md_text, title):
+    """Converts basic markdown to a Word document."""
+    doc = Document()
+    
+    # Set default font
+    style = doc.styles['Normal']
+    font = style.font
+    font.name = 'Calibri'
+    font.size = Pt(11)
+
+    # Simple Markdown parsing
+    lines = md_text.split('\n')
+    for line in lines:
+        line = line.strip()
+        if not line:
+            doc.add_paragraph()
+            continue
+            
+        # Headers
+        if line.startswith('# '):
+            doc.add_heading(line[2:], level=1)
+        elif line.startswith('## '):
+            doc.add_heading(line[3:], level=2)
+        elif line.startswith('### '):
+            doc.add_heading(line[4:], level=3)
+        elif line.startswith('#### '):
+            doc.add_heading(line[5:], level=4)
+        # Bullet points
+        elif line.startswith('- ') or line.startswith('* '):
+            p = doc.add_paragraph(line[2:], style='List Bullet')
+        # Bold text (very basic support for **text**)
+        elif '**' in line:
+            p = doc.add_paragraph()
+            parts = line.split('**')
+            for i, part in enumerate(parts):
+                run = p.add_run(part)
+                if i % 2 == 1:
+                    run.bold = True
+        else:
+            doc.add_paragraph(line)
+
+    bio = io.BytesIO()
+    doc.save(bio)
+    bio.seek(0)
+    return bio
+
 def summarize_transcription(structured_transcription, api_key, summary_prompt, provider="claude", model=None):
    
     if not structured_transcription:
@@ -615,10 +664,13 @@ This is the transcript I want you to process:"""
 
 MTMT_DETAILED_PROMPT = """Egy megbeszélés átiratát adom meg neked. 
 
-Készíts egy részletes összefoglalót a megbeszélésről. 
-Az összefoglalónak tartalmaznia kell minden fontos részletet, ami elhangzott. 
-Tagold témakörök szerint, és használj felsorolásokat a könnyebb olvashatóság érdekében. 
-A cél az, hogy aki nem volt ott a megbeszélésen, az is teljes képet kapjon a történtekről.
+Készíts egy RENDKÍVÜL részletes összefoglalót a megbeszélésről. Semmi érdemi információ ne maradjon ki, az összefoglaló legyen kifejezetten hosszú és alapos, de természetesen csak olyasmit tartalmazzon, ami ténylegesen elhangzott.
+
+Fontos szabályok:
+1. Ne próbálj neveket kitalálni vagy találgatni, ha nem hangzottak el egyértelműen.
+2. Minden szakmai részletet, döntést, érvet és felvetést rögzíts.
+3. Tagold témakörök szerint, használj beszédes alcímeket és részletes felsorolásokat.
+4. A cél az, hogy az összefoglaló alapján tökéletesen rekonstruálható legyen a megbeszélés tartalma és menete.
 
 Ez az átirat, amit fel kell dolgoznod:"""
 
@@ -1608,13 +1660,31 @@ with tab5:
             st.subheader("Részletes összefoglaló")
             st.markdown(st.session_state.mtmt_detailed)
             if st.session_state.mtmt_detailed:
-                st.download_button("Részletes letöltése", st.session_state.mtmt_detailed, "reszletes_osszefoglalo.txt")
+                st.download_button("Részletes letöltése (.txt)", st.session_state.mtmt_detailed, "reszletes_osszefoglalo.txt")
+                
+                # Word Download
+                docx_bio = convert_md_to_docx(st.session_state.mtmt_detailed, "Részletes összefoglaló")
+                st.download_button(
+                    label="Részletes letöltése (.docx)",
+                    data=docx_bio,
+                    file_name="reszletes_osszefoglalo.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
                 
         with col_res2:
             st.subheader("Egyoldalas & Teendők")
             st.markdown(st.session_state.mtmt_onepager)
             if st.session_state.mtmt_onepager:
-                st.download_button("Egyoldalas letöltése", st.session_state.mtmt_onepager, "egyoldalas_osszefoglalo.txt")
+                st.download_button("Egyoldalas letöltése (.txt)", st.session_state.mtmt_onepager, "egyoldalas_osszefoglalo.txt")
+
+                # Word Download
+                docx_bio_one = convert_md_to_docx(st.session_state.mtmt_onepager, "Egyoldalas összefoglaló")
+                st.download_button(
+                    label="Egyoldalas letöltése (.docx)",
+                    data=docx_bio_one,
+                    file_name="egyoldalas_osszefoglalo.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                )
         
         with st.expander("Nyers átirat megtekintése"):
             st.text_area("Transcript", st.session_state.mtmt_raw, height=300)
