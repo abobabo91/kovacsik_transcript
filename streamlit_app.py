@@ -456,7 +456,7 @@ def format_transcription(transcription, api_key, provider, model):
         return ""
     
 def convert_md_to_docx(md_text, title):
-    """Converts basic markdown to a Word document."""
+    """Converts markdown to a Word document with robust bold parsing."""
     doc = Document()
     
     # Set default font
@@ -465,36 +465,44 @@ def convert_md_to_docx(md_text, title):
     font.name = 'Calibri'
     font.size = Pt(11)
 
+    def add_formatted_text(paragraph, text):
+        """Helper to handle inline bolding within a paragraph."""
+        parts = text.split('**')
+        for i, part in enumerate(parts):
+            if part:
+                run = paragraph.add_run(part)
+                if i % 2 == 1:
+                    run.bold = True
+
     # Simple Markdown parsing
     lines = md_text.split('\n')
     for line in lines:
-        line = line.strip()
-        if not line:
+        clean_line = line.strip()
+        if not clean_line:
             doc.add_paragraph()
             continue
             
         # Headers
-        if line.startswith('# '):
-            doc.add_heading(line[2:], level=1)
-        elif line.startswith('## '):
-            doc.add_heading(line[3:], level=2)
-        elif line.startswith('### '):
-            doc.add_heading(line[4:], level=3)
-        elif line.startswith('#### '):
-            doc.add_heading(line[5:], level=4)
+        if clean_line.startswith('# '):
+            p = doc.add_heading('', level=1)
+            add_formatted_text(p, clean_line[2:])
+        elif clean_line.startswith('## '):
+            p = doc.add_heading('', level=2)
+            add_formatted_text(p, clean_line[3:])
+        elif clean_line.startswith('### '):
+            p = doc.add_heading('', level=3)
+            add_formatted_text(p, clean_line[4:])
+        elif clean_line.startswith('#### '):
+            p = doc.add_heading('', level=4)
+            add_formatted_text(p, clean_line[5:])
         # Bullet points
-        elif line.startswith('- ') or line.startswith('* '):
-            p = doc.add_paragraph(line[2:], style='List Bullet')
-        # Bold text (very basic support for **text**)
-        elif '**' in line:
-            p = doc.add_paragraph()
-            parts = line.split('**')
-            for i, part in enumerate(parts):
-                run = p.add_run(part)
-                if i % 2 == 1:
-                    run.bold = True
+        elif clean_line.startswith('- ') or clean_line.startswith('* '):
+            p = doc.add_paragraph('', style='List Bullet')
+            add_formatted_text(p, clean_line[2:])
+        # Normal paragraph (handles bold internally)
         else:
-            doc.add_paragraph(line)
+            p = doc.add_paragraph()
+            add_formatted_text(p, clean_line)
 
     bio = io.BytesIO()
     doc.save(bio)
@@ -670,7 +678,8 @@ Fontos szabályok:
 1. Ne próbálj neveket kitalálni vagy találgatni, ha nem hangzottak el egyértelműen.
 2. Minden szakmai részletet, döntést, érvet és felvetést rögzíts.
 3. Tagold témakörök szerint, használj beszédes alcímeket és részletes felsorolásokat.
-4. A cél az, hogy az összefoglaló alapján tökéletesen rekonstruálható legyen a megbeszélés tartalma és menete.
+4. NE HASZNÁLJ Markdown táblázatokat, rögzíts mindent tagolt szöveges formában és felsorolásokkal.
+5. A cél az, hogy az összefoglaló alapján tökéletesen rekonstruálható legyen a megbeszélés tartalma és menete.
 
 Ez az átirat, amit fel kell dolgoznod:"""
 
@@ -683,7 +692,9 @@ A következő szekciókat tartalmazza az összefoglaló:
 3. Teendők (Action Items) felelősökkel és határidőkkel, ha elhangzottak.
 4. Következő lépések.
 
-A válaszod legyen tömör, professzionális és magyar nyelvű.
+Fontos szabályok:
+- A válaszod legyen tömör, professzionális és magyar nyelvű.
+- NE HASZNÁLJ Markdown táblázatokat, rögzíts mindent felsorolásokkal.
 
 Ez az átirat, amit fel kell dolgoznod:"""
 
