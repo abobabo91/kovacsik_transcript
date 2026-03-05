@@ -543,6 +543,13 @@ if 'last_processed_file' not in st.session_state:
 if 'summary_model_provider' not in st.session_state:
     st.session_state.summary_model_provider = "Google"
 # summary_selected_model removed in favor of dynamic resolution
+if 'mtmt_raw' not in st.session_state:
+    st.session_state.mtmt_raw = ''
+if 'mtmt_detailed' not in st.session_state:
+    st.session_state.mtmt_detailed = ''
+if 'mtmt_onepager' not in st.session_state:
+    st.session_state.mtmt_onepager = ''
+
 INTERVIEW_PROMPT = """I give you the transcription of an interview. It is a customer discovery call about a company, exploring what they do, their business needs, and their methods.
 
 What I need is a summary of the interview for my notes. 
@@ -605,6 +612,28 @@ Keep the summary concise but ensure no critical information is lost. Use exact w
 
 This is the transcript I want you to process:"""
 
+MTMT_DETAILED_PROMPT = """Egy megbeszélés átiratát adom meg neked. 
+
+Készíts egy részletes összefoglalót a megbeszélésről. 
+Az összefoglalónak tartalmaznia kell minden fontos részletet, ami elhangzott. 
+Tagold témakörök szerint, és használj felsorolásokat a könnyebb olvashatóság érdekében. 
+A cél az, hogy aki nem volt ott a megbeszélésen, az is teljes képet kapjon a történtekről.
+
+Ez az átirat, amit fel kell dolgoznod:"""
+
+MTMT_ONEPAGER_PROMPT = """Egy megbeszélés átiratát adom meg neked. 
+
+Készíts egy egyoldalas, lényegretörő összefoglalót. 
+A következő szekciókat tartalmazza az összefoglaló:
+1. Rövid összefoglaló a megbeszélés céljáról és fő kimeneteléről.
+2. Legfontosabb döntések.
+3. Teendők (Action Items) felelősökkel és határidőkkel, ha elhangzottak.
+4. Következő lépések.
+
+A válaszod legyen tömör, professzionális és magyar nyelvű.
+
+Ez az átirat, amit fel kell dolgoznod:"""
+
 if 'summary_prompt' not in st.session_state:
     st.session_state.summary_prompt = INTERVIEW_PROMPT
 if 'summary_type' not in st.session_state:
@@ -636,7 +665,7 @@ def get_summary_model(provider):
     return None
 
 # Create tabs for a better UI experience
-tab1, tab2, tab3, tab4 = st.tabs(["Transcribe & Format", "Video Transcribe", "Summarize", "YouTube Transcribe"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["Transcribe & Format", "Video Transcribe", "Summarize", "YouTube Transcribe", "MTMT"])
 
 with tab1:
     st.header("Get Interview Transcription")
@@ -671,9 +700,9 @@ with tab1:
             if transcription_provider == "Google":
                 transcription_model = st.selectbox(
                     "Google Model",
-                    ["gemini-3.1-pro-preview", "gemini-2.5-flash"],
+                    ["gemini-3.1-pro-preview", "gemini-3-flash-preview", "gemini-2.5-flash"],
                     index=0,
-                    help="Gemini 3 Pro is high quality, Gemini 2.5 Flash is fast and efficient."
+                    help="Gemini 3 Pro is high quality, Gemini 3 Flash is fast and efficient."
                 )
                 t_api_key = google_api_key
             else:
@@ -710,7 +739,7 @@ with tab1:
             if st.session_state.formatting_provider == "Google":
                 st.session_state.formatting_model = st.selectbox(
                     "Formatting Model",
-                    ["gemini-3.1-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash"],
+                    ["gemini-3.1-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro", "gemini-2.5-flash"],
                     index=0,
                     key="fmt_model_select_upload"
                 )
@@ -930,7 +959,7 @@ with tab1:
             if st.session_state.formatting_provider == "Google":
                 st.session_state.formatting_model = st.selectbox(
                     "Formatting Model",
-                    ["gemini-3.1-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash"],
+                    ["gemini-3.1-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro", "gemini-2.5-flash"],
                     index=0,
                     key="fmt_model_select_text"
                 )
@@ -993,7 +1022,7 @@ with tab2:
         if v_transcription_provider == "Google":
             v_transcription_model = st.selectbox(
                 "Google Model",
-                ["gemini-3.1-pro-preview", "gemini-2.5-flash"],
+                ["gemini-3.1-pro-preview", "gemini-3-flash-preview", "gemini-2.5-flash"],
                 index=0,
                 key="v_mod_goog"
             )
@@ -1031,7 +1060,7 @@ with tab2:
         if st.session_state.formatting_provider == "Google":
             st.session_state.formatting_model = st.selectbox(
                 "Formatting Model",
-                ["gemini-3.1-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash"],
+                ["gemini-3.1-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro", "gemini-2.5-flash"],
                 index=0,
                 key="fmt_model_select_video"
             )
@@ -1159,7 +1188,7 @@ with tab3:
                 # Latest Google Models (Late 2025)
                 st.selectbox(
                     "Select Google Model",
-                    ["gemini-3.1-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash"],
+                    ["gemini-3.1-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro", "gemini-2.5-flash"],
                     index=0,
                     key="summary_model_google"
                 )
@@ -1217,7 +1246,7 @@ with tab3:
             st.subheader("Interview Summary")
             st.text_area("Summary", st.session_state.structured_summary, height=400)
 
-with tab3:
+with tab4:
     st.header("YouTube Video Transcription")
     
     col_url, col_fetch_dlp, col_fetch_api = st.columns([3, 1, 1])
@@ -1281,7 +1310,7 @@ with tab3:
         if yt_transcription_provider == "Google":
             yt_transcription_model = st.selectbox(
                 "Google Model",
-                ["gemini-3.1-pro-preview", "gemini-2.5-flash"],
+                ["gemini-3.1-pro-preview", "gemini-3-flash-preview", "gemini-2.5-flash"],
                 index=0,
                 key="yt_mod_goog"
             )
@@ -1518,6 +1547,76 @@ with tab3:
             
         with st.expander("Show Raw Transcription"):
             st.code(res['raw'], language=None)
+
+with tab5:
+    st.header("MTMT - Meeting Transcribe (HU)")
+    st.info("Automated Hungarian meeting transcription and summarization using Gemini 3 Flash Preview.")
+
+    uploaded_mtmt_video = st.file_uploader("Upload a meeting video file", type=["mp4", "mov", "avi", "mkv"], key="mtmt_uploader")
+    
+    if st.button("Start MTMT Processing"):
+        if not uploaded_mtmt_video:
+            st.warning("Please upload a video file.")
+        elif not google_api_key:
+            st.error("Google API Key not found in secrets.")
+        else:
+            mtmt_status = st.empty()
+            try:
+                # Use Gemini 3 Flash Preview as requested
+                mtmt_model = "gemini-3-flash-preview"
+                
+                # 0. Extract Audio
+                mtmt_status.info("1/4: Audio kinyerése a videóból...")
+                mt_audio_path = extract_audio_from_video(uploaded_mtmt_video)
+                
+                if mt_audio_path and os.path.exists(mt_audio_path):
+                    with open(mt_audio_path, "rb") as audio_file:
+                        # 1. Transcribe (Hungarian)
+                        mtmt_status.info(f"2/4: Átírás folyamatban ({mtmt_model})...")
+                        raw_trans = transcribe_audio(audio_file, google_api_key, "google", mtmt_model, "hu", 0)
+                        
+                        if raw_trans:
+                            st.session_state.mtmt_raw = raw_trans
+                            
+                            # 2. Detailed Summary
+                            mtmt_status.info("3/4: Részletes összefoglaló készítése...")
+                            detailed = summarize_transcription(raw_trans, google_api_key, MTMT_DETAILED_PROMPT, provider="google", model=mtmt_model)
+                            st.session_state.mtmt_detailed = detailed
+                            
+                            # 3. One-pager
+                            mtmt_status.info("4/4: Egyoldalas összefoglaló és teendők készítése...")
+                            onepager = summarize_transcription(raw_trans, google_api_key, MTMT_ONEPAGER_PROMPT, provider="google", model=mtmt_model)
+                            st.session_state.mtmt_onepager = onepager
+                            
+                            mtmt_status.success("Feldolgozás sikeresen befejeződött!")
+                        else:
+                            mtmt_status.error("Az átírás nem sikerült.")
+                    
+                    if os.path.exists(mt_audio_path):
+                        os.remove(mt_audio_path)
+                else:
+                    mtmt_status.error("Nem sikerült kinyerni az audiót.")
+            except Exception as e:
+                st.error(f"Hiba történt: {e}")
+
+    if st.session_state.mtmt_detailed or st.session_state.mtmt_onepager:
+        st.divider()
+        col_res1, col_res2 = st.columns(2)
+        
+        with col_res1:
+            st.subheader("Részletes összefoglaló")
+            st.markdown(st.session_state.mtmt_detailed)
+            if st.session_state.mtmt_detailed:
+                st.download_button("Részletes letöltése", st.session_state.mtmt_detailed, "reszletes_osszefoglalo.txt")
+                
+        with col_res2:
+            st.subheader("Egyoldalas & Teendők")
+            st.markdown(st.session_state.mtmt_onepager)
+            if st.session_state.mtmt_onepager:
+                st.download_button("Egyoldalas letöltése", st.session_state.mtmt_onepager, "egyoldalas_osszefoglalo.txt")
+        
+        with st.expander("Nyers átirat megtekintése"):
+            st.text_area("Transcript", st.session_state.mtmt_raw, height=300)
 
 # Add download buttons for the outputs
 st.sidebar.markdown("---")
