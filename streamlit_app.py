@@ -1,6 +1,4 @@
 import streamlit as st
-# Set max upload size to 1GB directly in the code
-st.set_option("server.maxUploadSize", 1024)
 
 import openai
 import anthropic
