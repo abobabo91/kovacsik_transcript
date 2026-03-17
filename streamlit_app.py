@@ -5,6 +5,7 @@ import anthropic
 import google.generativeai as genai
 import os
 import tempfile
+import time
 import subprocess
 import sys
 import re
@@ -42,10 +43,11 @@ except Exception:
 from pydub import AudioSegment
 from pydub.utils import make_chunks
 
-def extract_audio_from_video(video_file):
+def extract_audio_from_video(video_file, show_error=True):
     """Extracts audio from a video file and returns the path to the MP3 file."""
     if mp is None:
-        st.error("MoviePy is not available.")
+        if show_error:
+            st.error("MoviePy is not available.")
         return None
         
     try:
@@ -65,7 +67,8 @@ def extract_audio_from_video(video_file):
             
         return audio_output_path
     except Exception as e:
-        st.error(f"Error extracting audio from video: {e}")
+        if show_error:
+            st.error(f"Error extracting audio from video: {e}")
         return None
 
 def download_youtube_audio(url, log_container=None):
@@ -361,19 +364,42 @@ def transcribe_audio(audio_file, api_key, provider="openai", model="gpt-4o-trans
         elif provider.lower() == "google":
             genai.configure(api_key=api_key)
             
-            # Create a temporary file to handle the uploaded audio data
-            suffix = f".{audio_file.name.split('.')[-1]}" if hasattr(audio_file, 'name') else ".mp3"
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
-                if hasattr(processed_audio_file, 'read'):
+            # Use pydub to normalize audio to MP3 before uploading to Gemini.
+            # This avoids issues with non-standard containers (like audio-only MP4s) 
+            # failing during Google's internal file processing.
+            tmp_file_path = None
+            try:
+                st.info("Normalizing audio for Google Gemini (converting to MP3)...")
+                if hasattr(processed_audio_file, 'seek'):
                     processed_audio_file.seek(0)
-                    tmp_file.write(processed_audio_file.read())
-                else:
-                    tmp_file.write(processed_audio_file.getvalue())
-                tmp_file_path = tmp_file.name
+                
+                audio_segment = AudioSegment.from_file(processed_audio_file)
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp_mp3:
+                    audio_segment.export(tmp_mp3.name, format="mp3", bitrate="192k")
+                    tmp_file_path = tmp_mp3.name
+            except Exception as e:
+                st.warning(f"Audio normalization failed: {e}. Attempting direct upload...")
+                # Fallback to direct upload if normalization fails
+                suffix = f".{audio_file.name.split('.')[-1]}" if hasattr(audio_file, 'name') else ".mp3"
+                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_direct:
+                    if hasattr(processed_audio_file, 'read'):
+                        processed_audio_file.seek(0)
+                        tmp_direct.write(processed_audio_file.read())
+                    else:
+                        tmp_direct.write(processed_audio_file.getvalue())
+                    tmp_file_path = tmp_direct.name
 
             try:
                 # Upload the file to Gemini
                 myfile = genai.upload_file(tmp_file_path)
+
+                # Wait for the file to be processed and become ACTIVE
+                while myfile.state.name == "PROCESSING":
+                    time.sleep(2)
+                    myfile = genai.get_file(myfile.name)
+                
+                if myfile.state.name == "FAILED":
+                    raise Exception("File processing failed on Google servers.")
                 
                 # Map language code to full name for better prompting
                 lang_map = {"en": "English", "hu": "Hungarian"}
@@ -679,7 +705,6 @@ Fontos szabályok:
 2. Minden szakmai részletet, döntést, érvet és felvetést rögzíts.
 3. Tagold témakörök szerint, használj beszédes alcímeket és részletes felsorolásokat.
 4. NE HASZNÁLJ Markdown táblázatokat, rögzíts mindent tagolt szöveges formában és felsorolásokkal.
-5. A cél az, hogy az összefoglaló alapján tökéletesen rekonstruálható legyen a megbeszélés tartalma és menete.
 
 Ez az átirat, amit fel kell dolgoznod:"""
 
@@ -1616,11 +1641,11 @@ with tab5:
     st.header("MTMT - Meeting Transcribe (HU)")
     st.info("Automated Hungarian meeting transcription and summarization using Gemini 3 Flash Preview.")
 
-    uploaded_mtmt_video = st.file_uploader("Upload a meeting video file (Max 1GB)", type=["mp4", "mov", "avi", "mkv"], key="mtmt_uploader", label_visibility="visible")
+    uploaded_mtmt_file = st.file_uploader("Upload a meeting video or audio file (Max 1GB)", type=["mp4", "mov", "avi", "mkv", "mp3", "m4a", "wav", "aac", "flac"], key="mtmt_uploader", label_visibility="visible")
     
     if st.button("Start MTMT Processing"):
-        if not uploaded_mtmt_video:
-            st.warning("Please upload a video file.")
+        if not uploaded_mtmt_file:
+            st.warning("Please upload a file.")
         elif not google_api_key:
             st.error("Google API Key not found in secrets.")
         else:
@@ -1629,37 +1654,50 @@ with tab5:
                 # Use Gemini 3 Flash Preview as requested
                 mtmt_model = "gemini-3-flash-preview"
                 
-                # 0. Extract Audio
-                mtmt_status.info("1/4: Audio kinyerése a videóból...")
-                mt_audio_path = extract_audio_from_video(uploaded_mtmt_video)
+                file_ext = uploaded_mtmt_file.name.lower().split('.')[-1]
+                is_audio = file_ext in ["mp3", "m4a", "wav", "aac", "flac"]
                 
-                if mt_audio_path and os.path.exists(mt_audio_path):
-                    with open(mt_audio_path, "rb") as audio_file:
-                        # 1. Transcribe (Hungarian)
-                        mtmt_status.info(f"2/4: Átírás folyamatban ({mtmt_model})...")
-                        raw_trans = transcribe_audio(audio_file, google_api_key, "google", mtmt_model, "hu", 0)
-                        
-                        if raw_trans:
-                            st.session_state.mtmt_raw = raw_trans
-                            
-                            # 2. Detailed Summary
-                            mtmt_status.info("3/4: Részletes összefoglaló készítése...")
-                            detailed = summarize_transcription(raw_trans, google_api_key, MTMT_DETAILED_PROMPT, provider="google", model=mtmt_model)
-                            st.session_state.mtmt_detailed = detailed
-                            
-                            # 3. One-pager
-                            mtmt_status.info("4/4: Egyoldalas összefoglaló és teendők készítése...")
-                            onepager = summarize_transcription(raw_trans, google_api_key, MTMT_ONEPAGER_PROMPT, provider="google", model=mtmt_model)
-                            st.session_state.mtmt_onepager = onepager
-                            
-                            mtmt_status.success("Feldolgozás sikeresen befejeződött!")
-                        else:
-                            mtmt_status.error("Az átírás nem sikerült.")
-                    
-                    if os.path.exists(mt_audio_path):
-                        os.remove(mt_audio_path)
+                raw_trans = None
+                
+                if is_audio:
+                    mtmt_status.info(f"1/4: Audio fájl észlelése, átírás folyamatban ({mtmt_model})...")
+                    raw_trans = transcribe_audio(uploaded_mtmt_file, google_api_key, "google", mtmt_model, "hu", 0)
                 else:
-                    mtmt_status.error("Nem sikerült kinyerni az audiót.")
+                    # 0. Extract Audio
+                    mtmt_status.info("1/4: Audio kinyerése a videóból...")
+                    mt_audio_path = extract_audio_from_video(uploaded_mtmt_file, show_error=False)
+                    
+                    if mt_audio_path and os.path.exists(mt_audio_path):
+                        with open(mt_audio_path, "rb") as audio_file:
+                            # 1. Transcribe (Hungarian)
+                            mtmt_status.info(f"2/4: Átírás folyamatban ({mtmt_model})...")
+                            raw_trans = transcribe_audio(audio_file, google_api_key, "google", mtmt_model, "hu", 0)
+                        
+                        if os.path.exists(mt_audio_path):
+                            os.remove(mt_audio_path)
+                    else:
+                        # Fallback for audio-only MP4s or failed extraction
+                        mtmt_status.warning("Video extrakció sikertelen, megpróbálom közvetlen audióként...")
+                        mtmt_status.info(f"2/4: Átírás folyamatban ({mtmt_model})...")
+                        raw_trans = transcribe_audio(uploaded_mtmt_file, google_api_key, "google", mtmt_model, "hu", 0)
+                
+                if raw_trans:
+                    st.session_state.mtmt_raw = raw_trans
+                    
+                    # 2. Detailed Summary
+                    mtmt_status.info("3/4: Részletes összefoglaló készítése...")
+                    detailed = summarize_transcription(raw_trans, google_api_key, MTMT_DETAILED_PROMPT, provider="google", model=mtmt_model)
+                    st.session_state.mtmt_detailed = detailed
+                    
+                    # 3. One-pager
+                    mtmt_status.info("4/4: Egyoldalas összefoglaló és teendők készítése...")
+                    onepager = summarize_transcription(raw_trans, google_api_key, MTMT_ONEPAGER_PROMPT, provider="google", model=mtmt_model)
+                    st.session_state.mtmt_onepager = onepager
+                    
+                    mtmt_status.success("Feldolgozás sikeresen befejeződött!")
+                else:
+                    mtmt_status.error("Az átírás nem sikerült.")
+                    
             except Exception as e:
                 st.error(f"Hiba történt: {e}")
 
