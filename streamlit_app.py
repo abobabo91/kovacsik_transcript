@@ -273,7 +273,7 @@ def get_playlist_videos_api(url, api_key):
         return [], f"API Error: {str(e)}"
 
 # Function to transcribe audio
-def transcribe_audio(audio_file, api_key, provider="openai", model="gpt-4o-transcribe", language="en", limit_minutes=0):
+def transcribe_audio(audio_file, api_key, provider="openai", model="gpt-4o-transcribe", language="en", limit_minutes=0, status_container=None):
     try:
         # Initial trimming logic (shared for both providers)
         processed_audio_file = audio_file
@@ -369,7 +369,10 @@ def transcribe_audio(audio_file, api_key, provider="openai", model="gpt-4o-trans
             # failing during Google's internal file processing.
             tmp_file_path = None
             try:
-                st.info("Normalizing audio for Google Gemini (converting to MP3)...")
+                if status_container:
+                    status_container.info("Normalizing audio for Google Gemini (converting to MP3)...")
+                else:
+                    st.info("Normalizing audio for Google Gemini (converting to MP3)...")
                 if hasattr(processed_audio_file, 'seek'):
                     processed_audio_file.seek(0)
                 
@@ -1661,7 +1664,7 @@ with tab5:
                 
                 if is_audio:
                     mtmt_status.info(f"1/4: Audio fájl észlelése, átírás folyamatban ({mtmt_model})...")
-                    raw_trans = transcribe_audio(uploaded_mtmt_file, google_api_key, "google", mtmt_model, "hu", 0)
+                    raw_trans = transcribe_audio(uploaded_mtmt_file, google_api_key, "google", mtmt_model, "hu", 0, status_container=mtmt_status)
                 else:
                     # 0. Extract Audio
                     mtmt_status.info("1/4: Audio kinyerése a videóból...")
@@ -1671,7 +1674,7 @@ with tab5:
                         with open(mt_audio_path, "rb") as audio_file:
                             # 1. Transcribe (Hungarian)
                             mtmt_status.info(f"2/4: Átírás folyamatban ({mtmt_model})...")
-                            raw_trans = transcribe_audio(audio_file, google_api_key, "google", mtmt_model, "hu", 0)
+                            raw_trans = transcribe_audio(audio_file, google_api_key, "google", mtmt_model, "hu", 0, status_container=mtmt_status)
                         
                         if os.path.exists(mt_audio_path):
                             os.remove(mt_audio_path)
@@ -1679,7 +1682,7 @@ with tab5:
                         # Fallback for audio-only MP4s or failed extraction
                         mtmt_status.warning("Video extrakció sikertelen, megpróbálom közvetlen audióként...")
                         mtmt_status.info(f"2/4: Átírás folyamatban ({mtmt_model})...")
-                        raw_trans = transcribe_audio(uploaded_mtmt_file, google_api_key, "google", mtmt_model, "hu", 0)
+                        raw_trans = transcribe_audio(uploaded_mtmt_file, google_api_key, "google", mtmt_model, "hu", 0, status_container=mtmt_status)
                 
                 if raw_trans:
                     st.session_state.mtmt_raw = raw_trans
